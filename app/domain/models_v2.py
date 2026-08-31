@@ -214,6 +214,7 @@ class Terminal(Base):
     cnpj: Mapped[str] = mapped_column(String(14), nullable=False)
     inscricao_estadual: Mapped[str] = mapped_column(String(30), nullable=False)
     telefone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    telefone_financeiro: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     email_financeiro: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     cep: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
