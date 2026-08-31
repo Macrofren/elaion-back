@@ -307,6 +307,8 @@ class Usuario(Base):
     email: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     cpf: Mapped[str] = mapped_column(String(11), unique=True, nullable=False, index=True)
     telefone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    cargo: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    registro_profissional: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     tipo_usuario: Mapped[TipoUsuario] = mapped_column(
         Enum(TipoUsuario, native_enum=False), default=TipoUsuario.USUARIO_TERMINAL, nullable=False
@@ -732,7 +734,7 @@ class Amostra(Base):
     codigo_amostra: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     temperatura_coleta_celsius: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     tipo_coleta: Mapped[TipoColeta] = mapped_column(
-        Enum(TipoColeta, native_enum=False), default=TipoColeta.SIMPLES, nullable=False
+        Enum(TipoColeta, native_enum=False), default=TipoColeta.CORRIDO, nullable=False
     )
     is_recoleta: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     has_descarga: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
@@ -746,7 +748,7 @@ class Amostra(Base):
         Enum(StatusAmostra, native_enum=False), default=StatusAmostra.AGUARDANDO_ANALISE, nullable=False
     )
     data_hora_coleta: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
-    amostrador_id: Mapped[int] = mapped_column(
+    operador_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
     )
     motivo_reprovacao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -759,7 +761,7 @@ class Amostra(Base):
     operacao: Mapped["OperacaoVeiculo"] = relationship(back_populates="amostras")
     compartimento: Mapped["OperacaoCompartimento"] = relationship(back_populates="amostras")
     produto: Mapped["Produto"] = relationship()
-    amostrador: Mapped["Usuario"] = relationship(foreign_keys=[amostrador_id])
+    operador: Mapped["Usuario"] = relationship(foreign_keys=[operador_id])
     tanque_pretendido: Mapped[Optional["Tanque"]] = relationship(foreign_keys=[tanque_descarga_pretendido_id])
     amostra_origem: Mapped[Optional["Amostra"]] = relationship(
         remote_side=[id], backref="recoletas"
@@ -798,6 +800,9 @@ class AnaliseAmostra(Base):
         Enum(ParecerLaudo, native_enum=False), default=ParecerLaudo.EM_ANDAMENTO, nullable=False
     )
     visto_analista: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    data_hora_visto: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    visto_registro_snapshot: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    hash_integridade_visto: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Parâmetros Físico-Químicos Diretos
