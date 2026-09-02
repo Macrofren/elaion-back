@@ -1,0 +1,71 @@
+﻿# Ambientes virtuais (venv, poetry, uv, pipenv, conda)
+.venv/
+venv/
+ENV/
+env/
+.env.local
+.env.*.local
+
+# Arquivos de ambiente e segredos
+.env
+*.env
+!*.env.example
+
+# Bytecode e caches do Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testes e cobertura de código
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Tipagem e linters (mypy, ruff, flake8)
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Banco de dados local / SQLite de desenvolvimento/testes
+*.sqlite
+*.sqlite3
+*.db
+
+# Migrações temporárias / Alembic
+# (OBS: versions/ deve ser commitado, ignoramos apenas arquivos temporários se houver)
+
+# IDEs, Editores e OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

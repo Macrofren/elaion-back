@@ -416,7 +416,7 @@ class Congenere(Base):
     terminal_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
     )
-    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
     cnpj: Mapped[Optional[str]] = mapped_column(String(14), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
