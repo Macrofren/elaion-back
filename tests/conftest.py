@@ -1,43 +1,28 @@
-from typing import AsyncGenerator
+﻿from typing import AsyncGenerator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db_session
-from app.domain.models import Base
+from app.infra.database import AsyncSessionLocal, engine
 from app.main import app
 
-# URL do banco de dados SQLite assíncrono em memória para a suíte de testes
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-test_engine = create_async_engine(
-    TEST_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    future=True,
-)
-
-TestingSessionLocal = async_sessionmaker(
-    bind=test_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-)
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_test_db():
-    """Cria as tabelas no banco de dados SQLite em memória antes da execução e encerra ao final."""
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_engine() -> AsyncGenerator[None, None]:
+    """
+    Descarta o pool de conexões ao fim de cada teste. Como o pytest-asyncio usa um
+    event loop por teste, isso evita reutilizar conexões asyncpg criadas em um loop
+    já encerrado ("Event loop is closed").
+    """
     yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Fixture que fornece uma sessão de banco de dados assíncrona limpa por teste."""
-    async with TestingSessionLocal() as session:
+    """Fixture que fornece uma sessão assíncrona com o PostgreSQL."""
+    async with AsyncSessionLocal() as session:
         yield session
 
 

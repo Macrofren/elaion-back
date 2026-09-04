@@ -1,13 +1,13 @@
 """
-Modelos ORM do Banco de Dados Relacional - Elaion Sirac
+Modelos ORM do Banco de Dados Relacional - Elaion (Versão 2 / Atualizada)
 Mapeamento feito via SQLAlchemy 2.0 (Declarative Base)
-baseado no Dicionário de Entidades e Atributos (MER_ELAION_SIRAC.md)
+Compatível com PostgreSQL (asyncpg / psycopg) e Clean Architecture.
 """
 
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum as PyEnum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -16,18 +16,21 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     Time,
+    UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
-    """Classe base declarativa para os modelos SQLAlchemy."""
+    """Classe base declarativa para os modelos SQLAlchemy v2."""
     pass
 
 
@@ -40,108 +43,394 @@ class PapelUsuario(str, PyEnum):
     QUIMICO = "Químico"
     OPERADOR = "Operador"
     ADM = "Adm"
+    CONGENERE = "Congênere"
 
 
-class StatusPortaria(str, PyEnum):
-    AGUARDANDO = "Aguardando"
-    ENTRARAM = "Entraram"
-    SAIRAM = "Saíram"
-    CANCELADOS = "Cancelados"
+class TipoUsuario(str, PyEnum):
+    ADMIN_SISTEMA = "ADMIN_SISTEMA"
+    USUARIO_TERMINAL = "USUARIO_TERMINAL"
+    CLIENTE_CONGENERE = "CLIENTE_CONGENERE"
 
 
-class EtapaAnalise(str, PyEnum):
-    COLETA = "Coleta"
-    EM_ANALISE = "Em análise"
-    CONCLUIDA = "Concluída"
+class TipoAcaoFuncionalidade(str, PyEnum):
+    VISUALIZAR = "VISUALIZAR"
+    CRIAR = "CRIAR"
+    EDITAR = "EDITAR"
+    APROVAR = "APROVAR"
+    EXCLUIR = "EXCLUIR"
 
 
-class StatusResultadoAmostra(str, PyEnum):
-    NORMAL = "Normal"
-    RECOLETA = "Recoleta"
-    REPROVADA = "Reprovada"
+class CategoriaProduto(str, PyEnum):
+    GASOLINA = "GASOLINA"
+    ETANOL = "ETANOL"
+    DIESEL = "DIESEL"
+    BIODIESEL = "BIODIESEL"
+
+
+class TipoPlataforma(str, PyEnum):
+    DESCARGA = "DESCARGA"
+    CARREGAMENTO = "CARREGAMENTO"
+    MISTA = "MISTA"
+
+
+class TipoOperacao(str, PyEnum):
+    DESCARGA = "DESCARGA"
+    CARREGAMENTO = "CARREGAMENTO"
+
+
+class StatusOperacao(str, PyEnum):
+    AGUARDANDO_PORTARIA = "AGUARDANDO_PORTARIA"
+    EM_AMOSTRAGEM = "EM_AMOSTRAGEM"
+    EM_ANALISE_LAB = "EM_ANALISE_LAB"
+    APROVADO_OPERACAO = "APROVADO_OPERACAO"
+    EM_OPERACAO = "EM_OPERACAO"
+    CONCLUIDO = "CONCLUIDO"
+    REPROVADO = "REPROVADO"
+    CANCELADO = "CANCELADO"
+
+
+class TipoColeta(str, PyEnum):
+    CORRIDO = "CORRIDO"
+    TOPO = "TOPO"
+    MEIO = "MEIO"
+    FUNDO = "FUNDO"
+
+
+class StatusAmostra(str, PyEnum):
+    AGUARDANDO_ANALISE = "AGUARDANDO_ANALISE"
+    EM_ANALISE = "EM_ANALISE"
+    APROVADA = "APROVADA"
+    REPROVADA = "REPROVADA"
+    RECOLETA_SOLICITADA = "RECOLETA_SOLICITADA"
+
+
+class ParecerLaudo(str, PyEnum):
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONFORME = "CONFORME"
+    NAO_CONFORME = "NAO_CONFORME"
+    RECOLETA = "RECOLETA"
 
 
 class StatusComprovante(str, PyEnum):
-    PENDENTE = "Pendente"
-    DISPONIVEL = "Disponível"
-    EDITADO = "Editado"
+    PENDENTE = "PENDENTE"
+    DISPONIVEL = "DISPONIVEL"
+    CANCELADO = "CANCELADO"
+
+
+class AcaoAuditoria(str, PyEnum):
+    INSERT = "INSERT"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+class OrigemMP(str, PyEnum):
+    VEGETAL = "VEGETAL"
+    ANIMAL = "ANIMAL"
+    
 
 
 # =============================================================================
-# ENTIDADES PRINCIPAIS E INFRAESTRUTURA
+# 1. MULTI-TENANCY, MÓDULOS E PERMISSÕES (RBAC)
 # =============================================================================
 
-class Usuario(Base):
+class Organizacao(Base):
     """
-    Entidade: usuario
-    Módulo Origem: Equipes (61:4875)
-    Descrição: Armazena colaboradores e operadores com suas credenciais e perfis.
+    Entidade: organizacao
+    Descrição: Empresa dona da conta SaaS / mantenedora dos terminais de combustíveis.
     """
-    __tablename__ = "usuario"
+    __tablename__ = "organizacao"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nome_completo: Mapped[str] = mapped_column(String(150), nullable=False)
-    cpf: Mapped[str] = mapped_column(String(14), unique=True, nullable=False)
-    login: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    papel: Mapped[PapelUsuario] = mapped_column(
-        Enum(PapelUsuario, native_enum=False), nullable=False
-    )
-    turno: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    telefone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
+    nome_fantasia: Mapped[str] = mapped_column(String(150), nullable=False)
+    cnpj: Mapped[str] = mapped_column(String(14), unique=True, nullable=False, index=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
 
     # Relacionamentos
-    veiculos_registrados: Mapped[List["Veiculo"]] = relationship(
-        foreign_keys="[Veiculo.usuario_registro_id]", back_populates="usuario_registro"
+    terminais: Mapped[List["Terminal"]] = relationship(back_populates="organizacao", cascade="all, delete-orphan")
+    convite: Mapped[Optional["ConviteCadastro"]] = relationship(back_populates="organizacao", uselist=False)
+
+    def __repr__(self) -> str:
+        return f"<Organizacao(id={self.id}, nome='{self.nome_fantasia}', cnpj='{self.cnpj}')>"
+
+
+class ConviteCadastro(Base):
+    """
+    Entidade: convite_cadastro
+    Descrição: Código de assinatura comercial emitido pelo SaaS (ex: ELAION-A3X9-K2M1)
+    necessário para autorizar o cadastro (onboarding) de uma nova organização/terminal.
+    """
+    __tablename__ = "convite_cadastro"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    utilizado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    utilizado_em: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    organizacao_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("organizacao.id", ondelete="SET NULL"), unique=True, nullable=True
     )
-    amostras_coletadas: Mapped[List["Amostra"]] = relationship(
-        foreign_keys="[Amostra.operador_id]", back_populates="operador"
+    expira_em: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+
+    # Relacionamentos
+    organizacao: Mapped[Optional["Organizacao"]] = relationship(back_populates="convite")
+
+    def __repr__(self) -> str:
+        return f"<ConviteCadastro(id={self.id}, codigo='{self.codigo}', utilizado={self.utilizado})>"
+
+
+class ModuloAssinatura(Base):
+    """
+    Entidade: modulo_assinatura
+    Descrição: Catálogo global dos módulos comercializados no sistema (ex: Operação de Pátio, Laboratório, SICOF).
+    """
+    __tablename__ = "modulo_assinatura"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(100), nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relacionamentos
+    funcionalidades: Mapped[List["ModuloFuncionalidade"]] = relationship(
+        back_populates="modulo", cascade="all, delete-orphan"
     )
-    analises_executadas: Mapped[List["AnaliseAmostra"]] = relationship(
-        foreign_keys="[AnaliseAmostra.analista_id]", back_populates="analista"
-    )
-    comprovantes_emitidos: Mapped[List["ComprovanteAmostra"]] = relationship(
-        foreign_keys="[ComprovanteAmostra.criado_por_usuario_id]", back_populates="criado_por_usuario"
-    )
-    historico_edicoes_comprovantes: Mapped[List["HistoricoEdicaoComprovante"]] = relationship(
-        back_populates="usuario"
+    contratos: Mapped[List["TerminalModuloContratado"]] = relationship(
+        back_populates="modulo", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
-        return f"<Usuario(id={self.id}, login='{self.login}', papel='{self.papel}')>"
+        return f"<ModuloAssinatura(id={self.id}, codigo='{self.codigo}', nome='{self.nome}')>"
+
+
+class ModuloFuncionalidade(Base):
+    """
+    Entidade: modulo_funcionalidade
+    Descrição: Funcionalidades e ações específicas pertencentes a cada módulo.
+    """
+    __tablename__ = "modulo_funcionalidade"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    modulo_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("modulo_assinatura.id", ondelete="CASCADE"), nullable=False
+    )
+    chave: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(100), nullable=False)
+    tipo_acao: Mapped[TipoAcaoFuncionalidade] = mapped_column(
+        Enum(TipoAcaoFuncionalidade, native_enum=False), nullable=False
+    )
+
+    # Relacionamentos
+    modulo: Mapped["ModuloAssinatura"] = relationship(back_populates="funcionalidades")
+    permissoes_usuarios: Mapped[List["UsuarioPermissao"]] = relationship(
+        back_populates="funcionalidade", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModuloFuncionalidade(id={self.id}, chave='{self.chave}', acao='{self.tipo_acao}')>"
 
 
 class Terminal(Base):
     """
     Entidade: terminal
-    Módulo Origem: Infraestrutura / Operação
-    Descrição: Cadastro dos terminais de recebimento e armazenagem de combustíveis.
+    Descrição: Unidade operacional física do terminal de recebimento e armazenagem.
     """
     __tablename__ = "terminal"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nome: Mapped[str] = mapped_column(String(100), nullable=False)
-    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    organizacao_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("organizacao.id", ondelete="CASCADE"), nullable=False
+    )
+    codigo_terminal: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
+    nome_fantasia: Mapped[str] = mapped_column(String(150), nullable=False)
+    cnpj: Mapped[str] = mapped_column(String(14), nullable=False)
+    inscricao_estadual: Mapped[str] = mapped_column(String(30), nullable=False)
+    telefone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    telefone_financeiro: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    email_financeiro: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cep: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    logradouro: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    numero: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    complemento: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    bairro: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cidade: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    uf: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organizacao_id", "codigo_terminal", name="uq_terminal_org_codigo"),
+    )
 
     # Relacionamentos
-    laboratorios: Mapped[List["Laboratorio"]] = relationship(back_populates="terminal", cascade="all, delete-orphan")
-    tanques: Mapped[List["Tanque"]] = relationship(back_populates="terminal", cascade="all, delete-orphan")
-    veiculos: Mapped[List["Veiculo"]] = relationship(back_populates="terminal")
+    organizacao: Mapped["Organizacao"] = relationship(back_populates="terminais")
+    modulos_contratados: Mapped[List["TerminalModuloContratado"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    usuarios_vinculados: Mapped[List["UsuarioTerminal"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    laboratorios: Mapped[List["Laboratorio"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    congeneres: Mapped[List["Congenere"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    plataformas: Mapped[List["Plataforma"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    tanques: Mapped[List["Tanque"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    bicos: Mapped[List["Bico"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    produtos_operados: Mapped[List["TerminalProduto"]] = relationship(
+        back_populates="terminal", cascade="all, delete-orphan"
+    )
+    operacoes: Mapped[List["OperacaoVeiculo"]] = relationship(
+        back_populates="terminal"
+    )
+    auditorias: Mapped[List["AuditoriaLog"]] = relationship(
+        back_populates="terminal"
+    )
 
     def __repr__(self) -> str:
-        return f"<Terminal(id={self.id}, nome='{self.nome}', codigo='{self.codigo}')>"
+        return f"<Terminal(id={self.id}, nome='{self.nome_fantasia}', codigo='{self.codigo_terminal}')>"
 
+
+class TerminalModuloContratado(Base):
+    """
+    Entidade: terminal_modulo_contratado
+    Descrição: Módulos contratados pelo terminal e seu período de vigência.
+    """
+    __tablename__ = "terminal_modulo_contratado"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    modulo_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("modulo_assinatura.id", ondelete="CASCADE"), nullable=False
+    )
+    data_inicio: Mapped[date] = mapped_column(Date, default=func.current_date(), nullable=False)
+    data_fim: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("terminal_id", "modulo_id", name="uq_terminal_modulo"),
+    )
+
+    # Relacionamentos
+    terminal: Mapped["Terminal"] = relationship(back_populates="modulos_contratados")
+    modulo: Mapped["ModuloAssinatura"] = relationship(back_populates="contratos")
+
+
+class Usuario(Base):
+    """
+    Entidade: usuario
+    Descrição: Cadastro central de colaboradores, operadores, químicos e parceiros.
+    """
+    __tablename__ = "usuario"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    nome: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    sobrenome: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(150), unique=True, nullable=True, index=True)
+    cpf: Mapped[Optional[str]] = mapped_column(String(11), unique=True, nullable=True, index=True)
+    cnpj: Mapped[Optional[str]] = mapped_column(String(14), unique=True, nullable=True, index=True)
+    telefone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    foto_perfil_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    papel: Mapped[Optional[PapelUsuario]] = mapped_column(
+        Enum(PapelUsuario, native_enum=False), nullable=True
+    )
+    senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    pin_seguranca_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    codigo_ativacao: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    codigo_liberacao_master: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    liberacao_expira_em: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status_conta: Mapped[str] = mapped_column(String(30), default="PENDENTE_ATIVACAO", nullable=False, index=True)
+    tipo_usuario: Mapped[TipoUsuario] = mapped_column(
+        Enum(TipoUsuario, native_enum=False), default=TipoUsuario.USUARIO_TERMINAL, nullable=False
+    )
+    is_master: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+
+    # Relacionamentos
+    terminais_acesso: Mapped[List["UsuarioTerminal"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Usuario(id={self.id}, cpf='{self.cpf}', status='{self.status_conta}')>"
+
+
+class UsuarioTerminal(Base):
+    """
+    Entidade: usuario_terminal
+    Descrição: Associação de acesso do usuário a um determinado terminal (sem cargo rígido).
+    """
+    __tablename__ = "usuario_terminal"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="CASCADE"), nullable=False
+    )
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "terminal_id", name="uq_usuario_terminal"),
+    )
+
+    # Relacionamentos
+    usuario: Mapped["Usuario"] = relationship(back_populates="terminais_acesso")
+    terminal: Mapped["Terminal"] = relationship(back_populates="usuarios_vinculados")
+    permissoes: Mapped[List["UsuarioPermissao"]] = relationship(
+        back_populates="usuario_terminal", cascade="all, delete-orphan"
+    )
+
+
+class UsuarioPermissao(Base):
+    """
+    Entidade: usuario_permissao
+    Descrição: Permissões funcionais diretas atribuídas ao usuário no terminal pelo usuário master.
+    """
+    __tablename__ = "usuario_permissao"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    usuario_terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario_terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    funcionalidade_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("modulo_funcionalidade.id", ondelete="CASCADE"), nullable=False
+    )
+    permitido: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("usuario_terminal_id", "funcionalidade_id", name="uq_usuario_funcionalidade"),
+    )
+
+    # Relacionamentos
+    usuario_terminal: Mapped["UsuarioTerminal"] = relationship(back_populates="permissoes")
+    funcionalidade: Mapped["ModuloFuncionalidade"] = relationship(back_populates="permissoes_usuarios")
+
+
+# =============================================================================
+# 2. ESTRUTURA FÍSICA E CADASTROS DE APOIO
+# =============================================================================
 
 class Laboratorio(Base):
     """
     Entidade: laboratorio
-    Módulo Origem: Qualidade / Laboratório
-    Descrição: Laboratórios vinculados a um terminal para ensaios físico-químicos.
+    Descrição: Laboratórios vinculados ao terminal para ensaios físico-químicos.
     """
     __tablename__ = "laboratorio"
 
@@ -152,21 +441,110 @@ class Laboratorio(Base):
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     codigo: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
 
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="laboratorios")
     analises: Mapped[List["AnaliseAmostra"]] = relationship(back_populates="laboratorio")
 
+
+class Congenere(Base):
+    """
+    Entidade: congenere
+    Descrição: Distribuidoras e clientes proprietárias das cargas e combustíveis.
+    """
+    __tablename__ = "congenere"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
+    cnpj: Mapped[Optional[str]] = mapped_column(String(14), nullable=True)
+    logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relacionamentos
+    terminal: Mapped["Terminal"] = relationship(back_populates="congeneres")
+    operacoes: Mapped[List["OperacaoVeiculo"]] = relationship(back_populates="congenere")
+
+
+class Produto(Base):
+    """
+    Entidade: produto
+    Descrição: Catálogo mestre de combustíveis e derivados de petróleo.
+    """
+    __tablename__ = "produto"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    codigo_anp: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(100), nullable=False)
+    categoria: Mapped[CategoriaProduto] = mapped_column(
+        Enum(CategoriaProduto, native_enum=False), nullable=False
+    )
+    unidade_medida: Mapped[str] = mapped_column(String(10), default="L", nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relacionamentos
+    tanques: Mapped[List["Tanque"]] = relationship(back_populates="produto")
+    bicos: Mapped[List["Bico"]] = relationship(back_populates="produto")
+    terminais_vinculados: Mapped[List["TerminalProduto"]] = relationship(back_populates="produto")
+
     def __repr__(self) -> str:
-        return f"<Laboratorio(id={self.id}, nome='{self.nome}', terminal_id={self.terminal_id})>"
+        return f"<Produto(id={self.id}, codigo_anp='{self.codigo_anp}', nome='{self.nome}')>"
+
+
+class TerminalProduto(Base):
+    """
+    Entidade: terminal_produto
+    Descrição: Associação entre produtos do catálogo e os terminais que os operam.
+    """
+    __tablename__ = "terminal_produto"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    produto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("terminal_id", "produto_id", name="uq_terminal_produto"),
+    )
+
+    # Relacionamentos
+    terminal: Mapped["Terminal"] = relationship(back_populates="produtos_operados")
+    produto: Mapped["Produto"] = relationship(back_populates="terminais_vinculados")
+
+
+class Plataforma(Base):
+    """
+    Entidade: plataforma
+    Descrição: Baias e ilhas físicas de operação no pátio do terminal.
+    """
+    __tablename__ = "plataforma"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    identificador: Mapped[str] = mapped_column(String(50), nullable=False)
+    nome: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    tipo: Mapped[TipoPlataforma] = mapped_column(
+        Enum(TipoPlataforma, native_enum=False), default=TipoPlataforma.MISTA, nullable=False
+    )
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relacionamentos
+    terminal: Mapped["Terminal"] = relationship(back_populates="plataformas")
+    bicos: Mapped[List["Bico"]] = relationship(back_populates="plataforma", cascade="all, delete-orphan")
 
 
 class Tanque(Base):
     """
     Entidade: tanque
-    Módulo Origem: Infraestrutura / Operação
-    Descrição: Tanques de armazenamento situados no terminal.
+    Descrição: Tanques de armazenamento físico situados no terminal.
     """
     __tablename__ = "tanque"
 
@@ -174,484 +552,455 @@ class Tanque(Base):
     terminal_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
     )
-    produto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("produto.id"), nullable=False)
+    produto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
     identificador_tanque: Mapped[str] = mapped_column(String(50), nullable=False)
-    capacidade_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    capacidade_nominal_litros: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    capacidade_operacional_litros: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    volume_atual_litros: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0.00"), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
 
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="tanques")
-    produto: Mapped["Produto"] = relationship()
-    comprovantes_descarga: Mapped[List["ComprovanteAmostra"]] = relationship(back_populates="tanque_descarga")
-
-    def __repr__(self) -> str:
-        return f"<Tanque(id={self.id}, identificador='{self.identificador_tanque}', terminal_id={self.terminal_id})>"
-
-
-class Congenere(Base):
-    """
-    Entidade: congenere
-    Módulo Origem: Portaria (0:1), Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Cadastro de distribuidoras e empresas congêneres.
-    """
-    __tablename__ = "congenere"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nome: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    codigo_sicof: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-
-    # Relacionamentos
-    veiculos: Mapped[List["Veiculo"]] = relationship(back_populates="congenere")
-    comprovantes: Mapped[List["ComprovanteAmostra"]] = relationship(back_populates="congenere")
-
-    def __repr__(self) -> str:
-        return f"<Congenere(id={self.id}, nome='{self.nome}')>"
-
-
-class Transportadora(Base):
-    """
-    Entidade: transportadora
-    Módulo Origem: Portaria (0:1), Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Cadastro de empresas de transporte rodoviário de combustíveis.
-    """
-    __tablename__ = "transportadora"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nome: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
-    is_propria: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-
-    # Relacionamentos
-    veiculos: Mapped[List["Veiculo"]] = relationship(back_populates="transportadora")
-
-    def __repr__(self) -> str:
-        return f"<Transportadora(id={self.id}, nome='{self.nome}', is_propria={self.is_propria})>"
-
-
-class Produto(Base):
-    """
-    Entidade: produto
-    Módulo Origem: Portaria (0:1), Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Catálogo de combustíveis e derivados de petróleo.
-    """
-    __tablename__ = "produto"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    nome: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    categoria: Mapped[str] = mapped_column(String(50), nullable=False)
-    unidade_medida: Mapped[str] = mapped_column(String(20), default="L", nullable=False)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-
-    # Relacionamentos
-    veiculos: Mapped[List["Veiculo"]] = relationship(
-        secondary="veiculo_produto", back_populates="produtos"
+    produto: Mapped["Produto"] = relationship(back_populates="tanques")
+    vinculos_bicos: Mapped[List["BicoTanqueVinculo"]] = relationship(
+        back_populates="tanque", cascade="all, delete-orphan"
     )
-    amostras: Mapped[List["Amostra"]] = relationship(back_populates="produto")
+    alocacoes_comprovante: Mapped[List["ComprovanteTanqueAlocacao"]] = relationship(
+        back_populates="tanque"
+    )
 
     def __repr__(self) -> str:
-        return f"<Produto(id={self.id}, nome='{self.nome}', categoria='{self.categoria}')>"
+        return f"<Tanque(id={self.id}, identificador='{self.identificador_tanque}', volume={self.volume_atual_litros})>"
 
 
-# =============================================================================
-# OPERAÇÃO DE PORTARIA E AMOSTRAGEM
-# =============================================================================
-
-class VeiculoProduto(Base):
+class Bico(Base):
     """
-    Entidade: veiculo_produto (Tabela Pivô N:N)
-    Módulo Origem: Portaria (0:1)
-    Descrição: Associação entre veículos e produtos transportados (MultiSelect).
+    Entidade: bico
+    Descrição: Braços de conexão e pontos de descarga/carregamento instalados nas plataformas.
     """
-    __tablename__ = "veiculo_produto"
+    __tablename__ = "bico"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    veiculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("veiculo.id", ondelete="CASCADE"), nullable=False
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
+    )
+    plataforma_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("plataforma.id", ondelete="CASCADE"), nullable=False
     )
     produto_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("produto.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
+    identificador_bico: Mapped[str] = mapped_column(String(50), nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relacionamentos
+    terminal: Mapped["Terminal"] = relationship(back_populates="bicos")
+    plataforma: Mapped["Plataforma"] = relationship(back_populates="bicos")
+    produto: Mapped["Produto"] = relationship(back_populates="bicos")
+    vinculos_tanques: Mapped[List["BicoTanqueVinculo"]] = relationship(
+        back_populates="bico", cascade="all, delete-orphan"
+    )
+    alocacoes_comprovante: Mapped[List["ComprovanteTanqueAlocacao"]] = relationship(
+        back_populates="bico"
     )
 
 
-class Veiculo(Base):
+class BicoTanqueVinculo(Base):
     """
-    Entidade: veiculo
-    Módulo Origem: Portaria (0:1), Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Registro de entrada e acompanhamento de caminhões-tanque.
+    Entidade: bico_tanque_vinculo
+    Descrição: Mapeamento de tubulação/manifold entre bicos e tanques de destino.
     """
-    __tablename__ = "veiculo"
+    __tablename__ = "bico_tanque_vinculo"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    terminal_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("terminal.id"), nullable=False)
-    placa: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    bico_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("bico.id", ondelete="CASCADE"), nullable=False
+    )
+    tanque_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tanque.id", ondelete="CASCADE"), nullable=False
+    )
+    is_padrao: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("bico_id", "tanque_id", name="uq_bico_tanque"),
+    )
+
+    # Relacionamentos
+    bico: Mapped["Bico"] = relationship(back_populates="vinculos_tanques")
+    tanque: Mapped["Tanque"] = relationship(back_populates="vinculos_bicos")
+
+
+# =============================================================================
+# 3. OPERAÇÃO DE PÁTIO (DESCARGA E CARREGAMENTO)
+# =============================================================================
+
+class OperacaoVeiculo(Base):
+    """
+    Entidade: operacao_veiculo
+    Descrição: Registro da viagem/atendimento do caminhão-tanque no terminal (Descarga ou Carregamento).
+    """
+    __tablename__ = "operacao_veiculo"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    terminal_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    congenere_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("congenere.id", ondelete="RESTRICT"), nullable=False
+    )
+    nome_transportadora: Mapped[str] = mapped_column(String(150), nullable=False)
+    is_transportadora_propria: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    placa_veiculo: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     nome_motorista: Mapped[str] = mapped_column(String(150), nullable=False)
     numero_nota_fiscal: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    origem: Mapped[str] = mapped_column(String(150), nullable=False)
-    congenere_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("congenere.id"), nullable=False)
-    transportadora_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("transportadora.id"), nullable=False
+    origem_destino: Mapped[str] = mapped_column(String(150), nullable=False)
+    tipo_operacao: Mapped[TipoOperacao] = mapped_column(
+        Enum(TipoOperacao, native_enum=False), default=TipoOperacao.DESCARGA, nullable=False
     )
-    is_transportadora_propria: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    numero_compartimentos: Mapped[int] = mapped_column(Integer, nullable=False)
-    capacidade_total_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    volume_nota_fiscal_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    status_portaria: Mapped[StatusPortaria] = mapped_column(
-        Enum(StatusPortaria, native_enum=False), default=StatusPortaria.AGUARDANDO, nullable=False
+    status_operacao: Mapped[StatusOperacao] = mapped_column(
+        Enum(StatusOperacao, native_enum=False), default=StatusOperacao.AGUARDANDO_PORTARIA, nullable=False
     )
-    data_hora_entrada: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    data_hora_saida: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    motivo_cancelamento: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    observacao_cancelamento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    data_hora_entrada: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+    data_hora_saida: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     observacao_geral: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    usuario_registro_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    usuario_aprovacao_saida_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
+    motivo_cancelamento: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    usuario_registro_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
+    )
+    usuario_liberacao_saida_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=True
+    )
+
+    __table_args__ = (
+        Index("idx_operacao_terminal_data", "terminal_id", "data_hora_entrada"),
+    )
 
     # Relacionamentos
-    terminal: Mapped["Terminal"] = relationship(back_populates="veiculos")
-    congenere: Mapped["Congenere"] = relationship(back_populates="veiculos")
-    transportadora: Mapped["Transportadora"] = relationship(back_populates="veiculos")
-    usuario_registro: Mapped["Usuario"] = relationship(
-        foreign_keys=[usuario_registro_id], back_populates="veiculos_registrados"
+    terminal: Mapped["Terminal"] = relationship(back_populates="operacoes")
+    congenere: Mapped["Congenere"] = relationship(back_populates="operacoes")
+    usuario_registro: Mapped["Usuario"] = relationship(foreign_keys=[usuario_registro_id])
+    usuario_liberacao_saida: Mapped[Optional["Usuario"]] = relationship(foreign_keys=[usuario_liberacao_saida_id])
+    compartimentos: Mapped[List["OperacaoCompartimento"]] = relationship(
+        back_populates="operacao", cascade="all, delete-orphan"
     )
-    usuario_aprovacao_saida: Mapped[Optional["Usuario"]] = relationship(
-        foreign_keys=[usuario_aprovacao_saida_id]
-    )
-    produtos: Mapped[List["Produto"]] = relationship(
-        secondary="veiculo_produto", back_populates="veiculos"
-    )
-    coletas: Mapped[List["ColetaAmostra"]] = relationship(
-        back_populates="veiculo", cascade="all, delete-orphan"
+    historico_status: Mapped[List["OperacaoStatusHistorico"]] = relationship(
+        back_populates="operacao", cascade="all, delete-orphan"
     )
     amostras: Mapped[List["Amostra"]] = relationship(
-        back_populates="veiculo", cascade="all, delete-orphan"
+        back_populates="operacao", cascade="all, delete-orphan"
     )
-    comprovante: Mapped[Optional["ComprovanteAmostra"]] = relationship(
-        back_populates="veiculo", uselist=False
-    )
-    historico_edicoes: Mapped[List["HistoricoEdicaoVeiculo"]] = relationship(
-        back_populates="veiculo", cascade="all, delete-orphan"
+    comprovantes: Mapped[List["ComprovanteOperacao"]] = relationship(
+        back_populates="operacao"
     )
 
     def __repr__(self) -> str:
-        return f"<Veiculo(id={self.id}, placa='{self.placa}', status='{self.status_portaria}')>"
+        return f"<OperacaoVeiculo(id={self.id}, placa='{self.placa_trator}', tipo='{self.tipo_operacao}', status='{self.status_operacao}')>"
 
 
-class ColetaAmostra(Base):
+class OperacaoCompartimento(Base):
     """
-    Entidade: coleta_amostra
-    Módulo Origem: Amostras (15:9289)
-    Descrição: Registra a sessão/lote de amostragem efetuada em um veículo.
+    Entidade: operacao_compartimento
+    Descrição: Compartimentos físicos do caminhão-tanque nesta viagem específica.
     """
-    __tablename__ = "coleta_amostra"
+    __tablename__ = "operacao_compartimento"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    veiculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("veiculo.id", ondelete="CASCADE"), nullable=False
+    operacao_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("operacao_veiculo.id", ondelete="CASCADE"), nullable=False
     )
-    numero_coleta: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    data_hora_coleta: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="Em andamento", nullable=False)
-    amostrador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
-    usuario_recebimento_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
+    numero_compartimento: Mapped[int] = mapped_column(Integer, nullable=False)
+    produto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
+    volume_nf_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    capacidade_compartimento_litros: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("operacao_id", "numero_compartimento", name="uq_operacao_num_compartimento"),
+    )
 
     # Relacionamentos
-    veiculo: Mapped["Veiculo"] = relationship(back_populates="coletas")
-    amostrador: Mapped[Optional["Usuario"]] = relationship(foreign_keys=[amostrador_id])
-    usuario_recebimento: Mapped[Optional["Usuario"]] = relationship(foreign_keys=[usuario_recebimento_id])
+    operacao: Mapped["OperacaoVeiculo"] = relationship(back_populates="compartimentos")
+    produto: Mapped["Produto"] = relationship()
     amostras: Mapped[List["Amostra"]] = relationship(
-        back_populates="coleta", cascade="all, delete-orphan"
+        back_populates="compartimento", cascade="all, delete-orphan"
     )
 
-    def __repr__(self) -> str:
-        return f"<ColetaAmostra(id={self.id}, veiculo_id={self.veiculo_id}, numero_coleta={self.numero_coleta})>"
 
+class OperacaoStatusHistorico(Base):
+    """
+    Entidade: operacao_status_historico
+    Descrição: Rastreabilidade das transições de status da operação no pátio.
+    """
+    __tablename__ = "operacao_status_historico"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    operacao_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("operacao_veiculo.id", ondelete="CASCADE"), nullable=False
+    )
+    status_anterior: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    status_novo: Mapped[str] = mapped_column(String(30), nullable=False)
+    data_hora: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
+    )
+    observacao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relacionamentos
+    operacao: Mapped["OperacaoVeiculo"] = relationship(back_populates="historico_status")
+    usuario: Mapped["Usuario"] = relationship()
+
+
+# =============================================================================
+# 4. AMOSTRAGEM E CONTROLE DE QUALIDADE (LABORATÓRIO)
+# =============================================================================
 
 class Amostra(Base):
     """
     Entidade: amostra
-    Módulo Origem: Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Representa cada amostra colhida individualmente por compartimento.
+    Descrição: Amostra colhida diretamente por compartimento para ensaios laboratoriais.
     """
     __tablename__ = "amostra"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    codigo_amostra: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
-    coleta_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("coleta_amostra.id", ondelete="CASCADE"), nullable=False
+    operacao_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("operacao_veiculo.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    veiculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("veiculo.id", ondelete="CASCADE"), nullable=False
+    compartimento_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("operacao_compartimento.id", ondelete="CASCADE"), nullable=False
     )
-    produto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("produto.id"), nullable=False)
-    identificador_compartimento: Mapped[str] = mapped_column(String(10), nullable=False)
-    capacidade_compartimento_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    produto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
+    codigo_amostra: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     temperatura_coleta_celsius: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
-    data_hora_coleta: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    data_hora_fim_analise: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    etapa_analise: Mapped[EtapaAnalise] = mapped_column(
-        Enum(EtapaAnalise, native_enum=False), default=EtapaAnalise.COLETA, nullable=False
-    )
-    status_resultado: Mapped[StatusResultadoAmostra] = mapped_column(
-        Enum(StatusResultadoAmostra, native_enum=False),
-        default=StatusResultadoAmostra.NORMAL,
-        nullable=False,
+    tipo_coleta: Mapped[TipoColeta] = mapped_column(
+        Enum(TipoColeta, native_enum=False), default=TipoColeta.CORRIDO, nullable=False
     )
     is_recoleta: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    origem_procedimento: Mapped[str] = mapped_column(String(30), default="Descarga", nullable=False)
-    operador_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
-    usuario_reprovacao_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
-    data_hora_reprovacao: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    has_descarga: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    amostra_origem_recoleta_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("amostra.id", ondelete="SET NULL"), nullable=True
+    )
+    tanque_descarga_pretendido_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("tanque.id", ondelete="SET NULL"), nullable=True
+    )
+    status_amostra: Mapped[StatusAmostra] = mapped_column(
+        Enum(StatusAmostra, native_enum=False), default=StatusAmostra.AGUARDANDO_ANALISE, nullable=False
+    )
+    data_hora_coleta: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+    operador_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
+    )
     motivo_reprovacao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    usuario_recoleta_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=True)
-    data_hora_recoleta: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     motivo_recoleta: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    origemMp: Mapped[OrigemMP] = mapped_column(
+        Enum(OrigemMP, native_enum=False), default=OrigemMP.VEGETAL, nullable=False
+    )
 
     # Relacionamentos
-    coleta: Mapped["ColetaAmostra"] = relationship(back_populates="amostras")
-    veiculo: Mapped["Veiculo"] = relationship(back_populates="amostras")
-    produto: Mapped["Produto"] = relationship(back_populates="amostras")
-    operador: Mapped[Optional["Usuario"]] = relationship(
-        foreign_keys=[operador_id], back_populates="amostras_coletadas"
+    operacao: Mapped["OperacaoVeiculo"] = relationship(back_populates="amostras")
+    compartimento: Mapped["OperacaoCompartimento"] = relationship(back_populates="amostras")
+    produto: Mapped["Produto"] = relationship()
+    operador: Mapped["Usuario"] = relationship(foreign_keys=[operador_id])
+    tanque_pretendido: Mapped[Optional["Tanque"]] = relationship(foreign_keys=[tanque_descarga_pretendido_id])
+    amostra_origem: Mapped[Optional["Amostra"]] = relationship(
+        remote_side=[id], backref="recoletas"
     )
-    usuario_reprovacao: Mapped[Optional["Usuario"]] = relationship(foreign_keys=[usuario_reprovacao_id])
-    usuario_recoleta: Mapped[Optional["Usuario"]] = relationship(foreign_keys=[usuario_recoleta_id])
     analise: Mapped[Optional["AnaliseAmostra"]] = relationship(
         back_populates="amostra", uselist=False, cascade="all, delete-orphan"
     )
-    comprovantes: Mapped[List["ComprovanteAmostra"]] = relationship(
-        secondary="comprovante_amostra_item", back_populates="amostras"
-    )
-    historico_edicoes: Mapped[List["HistoricoEdicaoAmostra"]] = relationship(
-        back_populates="amostra", cascade="all, delete-orphan"
+    comprovantes_representados: Mapped[List["ComprovanteOperacao"]] = relationship(
+        back_populates="amostra_representativa"
     )
 
     def __repr__(self) -> str:
-        return f"<Amostra(id={self.id}, codigo='{self.codigo_amostra}', compartimento='{self.identificador_compartimento}')>"
+        return f"<Amostra(id={self.id}, codigo='{self.codigo_amostra}', status='{self.status_amostra}')>"
 
 
 class AnaliseAmostra(Base):
     """
     Entidade: analise_amostra
-    Módulo Origem: Amostras (15:9289), Comprovantes (41:2)
-    Descrição: Laudo contendo os resultados dos ensaios físico-químicos da amostra.
+    Descrição: Laudo físico-químico unificado contendo os resultados dos ensaios da amostra.
     """
     __tablename__ = "analise_amostra"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     amostra_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("amostra.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("amostra.id", ondelete="CASCADE"), unique=True, nullable=False
     )
-    analista_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    laboratorio_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("laboratorio.id"), nullable=True)
-    tipo_especifico_produto: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    cor: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    aspecto: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    material_particulado: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    agua_livre: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    numero_amostra_lab: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    visto_analista: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    analista_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
+    )
+    laboratorio_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("laboratorio.id", ondelete="RESTRICT"), nullable=False
+    )
+    data_hora_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+    data_hora_fim: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    parecer_final: Mapped[ParecerLaudo] = mapped_column(
+        Enum(ParecerLaudo, native_enum=False), default=ParecerLaudo.EM_ANDAMENTO, nullable=False
+    )
+    visto_analista: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    data_hora_visto: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    visto_registro_snapshot: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    hash_integridade_visto: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Parâmetros Físico-Químicos Diretos
     densidade_kg_l: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 4), nullable=True)
     temperatura_ensaio_celsius: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
-    fator_correcao: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 4), nullable=True)
+    fator_correcao: Mapped[Optional[Decimal]] = mapped_column(Numeric(7, 5), nullable=True)
     massa_especifica_20c_kg_l: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 4), nullable=True)
     grau_inpm: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    teor_etanol_gasolina_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     teor_agua_ppm: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
-    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    data_hora_analise: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    aspecto: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    cor: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    material_particulado: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    agua_livre: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    ponto_fulgor_celsius: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    condutividade_eletrica: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    metanol: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    destilacao: Mapped[Optional[Boolean]] = mapped_column(Boolean, nullable=True)
+
+    # Suporte a resultados extras e futuros parâmetros sem necessidade de migração DDL
+    resultados_extras: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     # Relacionamentos
     amostra: Mapped["Amostra"] = relationship(back_populates="analise")
-    analista: Mapped["Usuario"] = relationship(
-        foreign_keys=[analista_id], back_populates="analises_executadas"
-    )
-    laboratorio: Mapped[Optional["Laboratorio"]] = relationship(back_populates="analises")
-    historico_edicoes: Mapped[List["HistoricoEdicaoAnalise"]] = relationship(
-        back_populates="analise", cascade="all, delete-orphan"
-    )
+    analista: Mapped["Usuario"] = relationship(foreign_keys=[analista_id])
+    laboratorio: Mapped["Laboratorio"] = relationship(back_populates="analises")
 
     def __repr__(self) -> str:
-        return f"<AnaliseAmostra(id={self.id}, amostra_id={self.amostra_id}, densidade={self.densidade_kg_l})>"
+        return f"<AnaliseAmostra(id={self.id}, amostra_id={self.amostra_id}, parecer='{self.parecer_final}')>"
 
 
 # =============================================================================
-# CERTIFICAÇÃO E AUDITORIA
+# 5. COMPROVANTES DE OPERAÇÃO E BALANÇO VOLUMÉTRICO
 # =============================================================================
 
-class ComprovanteAmostra(Base):
+class ComprovanteOperacao(Base):
     """
-    Entidade: comprovante_amostra
-    Módulo Origem: Comprovantes (41:2)
-    Descrição: Certificado de análise e documento de conferência volumétrica.
+    Entidade: comprovante_operacao
+    Descrição: Certificado e comprovante volumétrico apurado a 20°C por tipo de produto.
     """
-    __tablename__ = "comprovante_amostra"
+    __tablename__ = "comprovante_operacao"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    veiculo_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("veiculo.id"), nullable=False)
-    congenere_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("congenere.id"), nullable=False)
+    operacao_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("operacao_veiculo.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    produto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    )
+    amostra_representativa_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("amostra.id", ondelete="RESTRICT"), nullable=False
+    )
+    congenere_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("congenere.id", ondelete="RESTRICT"), nullable=False
+    )
     numero_sicof: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     lancamento_sicof: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    nota_fiscal_numero: Mapped[str] = mapped_column(String(50), nullable=False)
-    volume_ambiente_nf_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    volume_20c_nf_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    numero_nota_fiscal: Mapped[str] = mapped_column(String(50), nullable=False)
     data_geracao: Mapped[date] = mapped_column(Date, nullable=False)
     hora_geracao: Mapped[time] = mapped_column(Time, nullable=False)
     densidade_20c_apurada: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    fator_correcao_fcv: Mapped[Decimal] = mapped_column(Numeric(7, 5), nullable=False)
     grau_inpm: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
-    fator_correcao: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False)
+    volume_ambiente_nf_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    volume_20c_nf_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     volume_ambiente_apurado_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    volume_20c_apurado_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    volume_20c_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     resultado_variacao_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    tanque_descarga_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("tanque.id"), nullable=True)
-    volume_retirada_litros: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
-    complemento_observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retirada_litros: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=True)
+    complemento_litros: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), default=Decimal("0.00"), nullable=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[StatusComprovante] = mapped_column(
-        Enum(StatusComprovante, native_enum=False),
-        default=StatusComprovante.DISPONIVEL,
-        nullable=False,
+        Enum(StatusComprovante, native_enum=False), default=StatusComprovante.DISPONIVEL, nullable=False
     )
-    criado_por_usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
+    criado_por_usuario_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="RESTRICT"), nullable=False
+    )
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
 
     # Relacionamentos
-    veiculo: Mapped["Veiculo"] = relationship(back_populates="comprovante")
-    congenere: Mapped["Congenere"] = relationship(back_populates="comprovantes")
-    tanque_descarga: Mapped[Optional["Tanque"]] = relationship(back_populates="comprovantes_descarga")
-    criado_por_usuario: Mapped["Usuario"] = relationship(
-        foreign_keys=[criado_por_usuario_id], back_populates="comprovantes_emitidos"
-    )
-    amostras: Mapped[List["Amostra"]] = relationship(
-        secondary="comprovante_amostra_item", back_populates="comprovantes"
-    )
-    historico_edicoes: Mapped[List["HistoricoEdicaoComprovante"]] = relationship(
+    operacao: Mapped["OperacaoVeiculo"] = relationship(back_populates="comprovantes")
+    produto: Mapped["Produto"] = relationship()
+    amostra_representativa: Mapped["Amostra"] = relationship(back_populates="comprovantes_representados")
+    congenere: Mapped["Congenere"] = relationship()
+    criado_por_usuario: Mapped["Usuario"] = relationship(foreign_keys=[criado_por_usuario_id])
+    alocacoes_tanques: Mapped[List["ComprovanteTanqueAlocacao"]] = relationship(
         back_populates="comprovante", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
-        return f"<ComprovanteAmostra(id={self.id}, sicof='{self.numero_sicof}', variacao_L={self.resultado_variacao_litros})>"
+        return f"<ComprovanteOperacao(id={self.id}, sicof='{self.numero_sicof}', variacao_L={self.resultado_variacao_litros})>"
 
 
-class ComprovanteAmostraItem(Base):
+class ComprovanteTanqueAlocacao(Base):
     """
-    Entidade: comprovante_amostra_item (Tabela Pivô N:N)
-    Módulo Origem: Comprovantes (41:2)
-    Descrição: Relaciona as amostras selecionadas para compor o comprovante emitido.
+    Entidade: comprovante_tanque_alocacao
+    Descrição: Alocação do volume descarregado/carregado em 1 ou mais tanques do terminal.
     """
-    __tablename__ = "comprovante_amostra_item"
+    __tablename__ = "comprovante_tanque_alocacao"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     comprovante_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("comprovante_amostra.id", ondelete="CASCADE"), nullable=False
+        BigInteger, ForeignKey("comprovante_operacao.id", ondelete="CASCADE"), nullable=False
     )
-    amostra_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("amostra.id", ondelete="CASCADE"), nullable=False
+    tanque_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tanque.id", ondelete="RESTRICT"), nullable=False
     )
+    bico_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("bico.id", ondelete="RESTRICT"), nullable=False
+    )
+    volume_alocado_litros: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+
+    # Relacionamentos
+    comprovante: Mapped["ComprovanteOperacao"] = relationship(back_populates="alocacoes_tanques")
+    tanque: Mapped["Tanque"] = relationship(back_populates="alocacoes_comprovante")
+    bico: Mapped["Bico"] = relationship(back_populates="alocacoes_comprovante")
 
 
 # =============================================================================
-# HISTÓRICOS DE AUDITORIA E EDICÕES
+# 6. AUDITORIA CENTRALIZADA
 # =============================================================================
 
-class HistoricoEdicaoComprovante(Base):
+class AuditoriaLog(Base):
     """
-    Entidade: historico_edicao_comprovante
-    Módulo Origem: Comprovantes (41:2)
-    Descrição: Registro de auditoria contendo modificações em comprovantes.
+    Entidade: auditoria_log
+    Descrição: Registro centralizado e imutável de auditoria com diffs JSONB.
     """
-    __tablename__ = "historico_edicao_comprovante"
+    __tablename__ = "auditoria_log"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    comprovante_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("comprovante_amostra.id", ondelete="CASCADE"), nullable=False
+    terminal_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("terminal.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    data_hora: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    descricao_acao: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # Relacionamentos
-    comprovante: Mapped["ComprovanteAmostra"] = relationship(back_populates="historico_edicoes")
-    usuario: Mapped["Usuario"] = relationship(back_populates="historico_edicoes_comprovantes")
-
-    def __repr__(self) -> str:
-        return f"<HistoricoEdicaoComprovante(id={self.id}, comprovante_id={self.comprovante_id}, usuario_id={self.usuario_id})>"
-
-
-class HistoricoEdicaoVeiculo(Base):
-    """
-    Entidade: historico_edicao_veiculo
-    Módulo Origem: Portaria / Auditoria
-    Descrição: Registro de auditoria contendo alterações nos dados do veículo.
-    """
-    __tablename__ = "historico_edicao_veiculo"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    veiculo_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("veiculo.id", ondelete="CASCADE"), nullable=False
+    tabela_nome: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    registro_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    acao: Mapped[AcaoAuditoria] = mapped_column(
+        Enum(AcaoAuditoria, native_enum=False), nullable=False
     )
-    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    data_hora: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    campo_alterado: Mapped[str] = mapped_column(String(100), nullable=False)
-    valor_anterior: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    valor_novo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dados_anteriores: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    dados_novos: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     motivo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Relacionamentos
-    veiculo: Mapped["Veiculo"] = relationship(back_populates="historico_edicoes")
-    usuario: Mapped["Usuario"] = relationship()
-
-    def __repr__(self) -> str:
-        return f"<HistoricoEdicaoVeiculo(id={self.id}, veiculo_id={self.veiculo_id}, campo='{self.campo_alterado}')>"
-
-
-class HistoricoEdicaoAmostra(Base):
-    """
-    Entidade: historico_edicao_amostra
-    Módulo Origem: Amostras / Auditoria
-    Descrição: Registro de auditoria contendo alterações nos dados da amostra.
-    """
-    __tablename__ = "historico_edicao_amostra"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    amostra_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("amostra.id", ondelete="CASCADE"), nullable=False
+    usuario_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True
     )
-    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    data_hora: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    campo_alterado: Mapped[str] = mapped_column(String(100), nullable=False)
-    valor_anterior: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    valor_novo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    motivo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ip_origem: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False, index=True)
 
-    # Relacionamentos
-    amostra: Mapped["Amostra"] = relationship(back_populates="historico_edicoes")
-    usuario: Mapped["Usuario"] = relationship()
-
-    def __repr__(self) -> str:
-        return f"<HistoricoEdicaoAmostra(id={self.id}, amostra_id={self.amostra_id}, campo='{self.campo_alterado}')>"
-
-
-class HistoricoEdicaoAnalise(Base):
-    """
-    Entidade: historico_edicao_analise
-    Módulo Origem: Amostras / Auditoria
-    Descrição: Registro de auditoria contendo alterações nos ensaios/laudos da análise da amostra.
-    """
-    __tablename__ = "historico_edicao_analise"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    analise_amostra_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("analise_amostra.id", ondelete="CASCADE"), nullable=False
+    __table_args__ = (
+        Index("idx_auditoria_tabela_reg", "tabela_nome", "registro_id", "criado_em"),
     )
-    usuario_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), nullable=False)
-    data_hora: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
-    campo_alterado: Mapped[str] = mapped_column(String(100), nullable=False)
-    valor_anterior: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    valor_novo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    motivo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relacionamentos
-    analise: Mapped["AnaliseAmostra"] = relationship(back_populates="historico_edicoes")
-    usuario: Mapped["Usuario"] = relationship()
+    terminal: Mapped[Optional["Terminal"]] = relationship(back_populates="auditorias")
+    usuario: Mapped[Optional["Usuario"]] = relationship()
 
     def __repr__(self) -> str:
-        return f"<HistoricoEdicaoAnalise(id={self.id}, analise_amostra_id={self.analise_amostra_id}, campo='{self.campo_alterado}')>"
+        return f"<AuditoriaLog(id={self.id}, tabela='{self.tabela_nome}', registro_id={self.registro_id}, acao='{self.acao}')>"

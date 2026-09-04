@@ -1,25 +1,26 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+# Exceções de domínio puras (definidas fora da camada web).
+from app.domain.exceptions import (  # noqa: F401  (re-export por compatibilidade)
+    AcessoNegadoException,
+    ConflitoException,
+    DomainException,
+    ItemNaoEncontradoException,
+    NaoAutorizadoException,
+    RegraNegocioException,
+)
 
-class DomainException(Exception):
-    """Exceção base para regras de negócio da camada Service."""
-    def __init__(self, message: str, status_code: int = status.HTTP_400_BAD_REQUEST):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(message)
 
-
-class ItemNotFoundException(DomainException):
+# Alias mantido por compatibilidade com código/testes existentes.
+class ItemNotFoundException(ItemNaoEncontradoException):
     def __init__(self, item_id: str):
-        super().__init__(
-            message=f"Item com ID '{item_id}' não foi encontrado.",
-            status_code=status.HTTP_404_NOT_FOUND,
-        )
+        super().__init__(f"Item com ID '{item_id}' não foi encontrado.")
 
 
 def setup_exception_handlers(app: FastAPI) -> None:
     """Registra handlers globais para capturar exceções de domínio."""
+
     @app.exception_handler(DomainException)
     async def domain_exception_handler(request: Request, exc: DomainException):
         return JSONResponse(
