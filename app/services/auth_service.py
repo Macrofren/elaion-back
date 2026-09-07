@@ -26,6 +26,7 @@ from app.domain.exceptions import (
 )
 from app.domain.models import Usuario
 from app.domain.schemas import (
+    AtualizarPerfilRequest,
     PrimeiroAcessoConcluirRequest,
     TerminalPermissaoDetalheDTO,
     TerminalVinculoDTO,
@@ -90,6 +91,7 @@ async def _montar_usuario_autenticado_dto(
         email=usuario.email,
         cpf=usuario.cpf,
         cnpj=usuario.cnpj,
+        telefone=usuario.telefone,
         is_master=usuario.is_master,
         tipo_usuario=usuario.tipo_usuario,
         papel=usuario.papel,
@@ -186,12 +188,90 @@ async def montar_perfil(session: AsyncSession, usuario: Usuario) -> UserProfileR
         sobrenome=usuario.sobrenome,
         cpf=usuario.cpf,
         cnpj=usuario.cnpj,
+        telefone=usuario.telefone,
         email=usuario.email,
+        foto_perfil_url=usuario.foto_perfil_url,
         is_master=usuario.is_master,
         tipo_usuario=usuario.tipo_usuario,
         status_conta=usuario.status_conta,
         terminais=terminais,
     )
+
+
+async def atualizar_perfil(
+    session: AsyncSession,
+    usuario: Usuario,
+    payload: AtualizarPerfilRequest,
+) -> UserProfileResponse:
+    """
+    Atualiza os dados cadastrais, foto de perfil e credenciais de segurança do usuário autenticado.
+    Valida a senha atual se for solicitada alteração de senha ou PIN.
+    """
+    # 1. Dados Cadastrais
+    if payload.nome is not None:
+        usuario.nome = payload.nome.strip()
+    if payload.sobrenome is not None:
+        usuario.sobrenome = payload.sobrenome.strip()
+    if payload.telefone is not None:
+        tel = payload.telefone.strip()
+        usuario.telefone = tel if tel else None
+
+    if payload.email is not None:
+        email_limpo = payload.email.strip().lower()
+        if not email_limpo or "@" not in email_limpo:
+            raise RegraNegocioException("Informe um endereço de e-mail válido.")
+        if email_limpo != (usuario.email or "").lower():
+            outro = await usuario_repository.get_by_email(session, email_limpo)
+            if outro and outro.id != usuario.id:
+                raise RegraNegocioException("O e-mail informado já está em uso por outro usuário.")
+            usuario.email = email_limpo
+
+    # CPF: permitido para colaboradores não-master
+    if not usuario.is_master and payload.cpf is not None:
+        cpf_limpo = _apenas_digitos(payload.cpf)
+        if cpf_limpo and cpf_limpo != (usuario.cpf or ""):
+            if len(cpf_limpo) != 11:
+                raise RegraNegocioException("O CPF deve conter exatamente 11 dígitos numéricos.")
+            outro = await usuario_repository.get_by_cpf(session, cpf_limpo)
+            if outro and outro.id != usuario.id:
+                raise RegraNegocioException("O CPF informado já está cadastrado para outro colaborador.")
+            usuario.cpf = cpf_limpo
+
+    if payload.foto_perfil_url is not None:
+        foto = payload.foto_perfil_url.strip()
+        usuario.foto_perfil_url = foto if foto else None
+
+    # 2. Segurança de Acesso (Senha e PIN)
+    quer_alterar_senha = bool(payload.nova_senha and payload.nova_senha.strip())
+    quer_alterar_pin = bool(payload.novo_pin and payload.novo_pin.strip())
+
+    if quer_alterar_senha or quer_alterar_pin:
+        if not payload.senha_atual or not payload.senha_atual.strip():
+            raise RegraNegocioException("Informe sua senha atual para alterar as credenciais de segurança.")
+        if not verify_password(payload.senha_atual, usuario.senha_hash):
+            raise RegraNegocioException("A senha atual informada está incorreta.")
+
+    if quer_alterar_senha:
+        nova_senha = payload.nova_senha.strip()
+        if len(nova_senha) < 6:
+            raise RegraNegocioException("A nova senha deve ter no mínimo 6 caracteres.")
+        if nova_senha != (payload.confirmacao_senha or "").strip():
+            raise RegraNegocioException("As senhas informadas não conferem.")
+        usuario.senha_hash = hash_password(nova_senha)
+
+    if quer_alterar_pin:
+        pin_limpo = _apenas_digitos(payload.novo_pin)
+        if len(pin_limpo) != 4:
+            raise RegraNegocioException("O PIN de segurança deve conter exatamente 4 dígitos numéricos.")
+        if pin_limpo != _apenas_digitos(payload.confirmacao_pin or ""):
+            raise RegraNegocioException("Os PINs informados não conferem.")
+        usuario.pin_seguranca_hash = hash_pin(pin_limpo)
+
+    session.add(usuario)
+    await session.commit()
+    await session.refresh(usuario)
+
+    return await montar_perfil(session, usuario)
 
 
 async def primeiro_acesso_validar(session: AsyncSession, cpf: str, codigo_ativacao: str) -> str:

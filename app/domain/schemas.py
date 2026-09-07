@@ -140,6 +140,7 @@ class UsuarioAutenticadoDTO(BaseModel):
     email: Optional[str] = None
     cpf: Optional[str] = None
     cnpj: Optional[str] = None
+    telefone: Optional[str] = None
     is_master: bool
     tipo_usuario: TipoUsuario
     papel: Optional[PapelUsuario] = None
@@ -182,12 +183,28 @@ class UserProfileResponse(BaseModel):
     sobrenome: Optional[str] = None
     cpf: Optional[str] = None
     cnpj: Optional[str] = None
+    telefone: Optional[str] = None
     email: Optional[str] = None
+    foto_perfil_url: Optional[str] = None
     is_master: bool
     tipo_usuario: TipoUsuario
     status_conta: str
     terminais: List[TerminalPermissaoDetalheDTO] = []
     model_config = ConfigDict(from_attributes=True)
+
+
+class AtualizarPerfilRequest(BaseModel):
+    nome: Optional[str] = None
+    sobrenome: Optional[str] = None
+    email: Optional[str] = None
+    telefone: Optional[str] = None
+    cpf: Optional[str] = None
+    foto_perfil_url: Optional[str] = None
+    senha_atual: Optional[str] = None
+    nova_senha: Optional[str] = None
+    confirmacao_senha: Optional[str] = None
+    novo_pin: Optional[str] = None
+    confirmacao_pin: Optional[str] = None
 
 
 # =============================================================================

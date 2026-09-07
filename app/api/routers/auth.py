@@ -10,6 +10,7 @@ from app.api.deps import get_db_session, obter_usuario_autenticado
 from app.core.config import settings
 from app.domain.models import Usuario
 from app.domain.schemas import (
+    AtualizarPerfilRequest,
     ConfirmarSenhaMasterRequest,
     LoginRequest,
     LoginResponse,
@@ -129,6 +130,21 @@ async def get_current_user_profile(
     session: AsyncSession = Depends(get_db_session),
 ) -> UserProfileResponse:
     return await auth_service.montar_perfil(session, usuario)
+
+
+@router.patch(
+    "/me",
+    response_model=UserProfileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Atualizar Perfil do Usuário Autenticado",
+    description="Atualiza dados cadastrais, foto de perfil e credenciais de segurança (senha e PIN) do usuário atual.",
+)
+async def atualizar_perfil(
+    payload: AtualizarPerfilRequest,
+    usuario: Usuario = Depends(obter_usuario_autenticado),
+    session: AsyncSession = Depends(get_db_session),
+) -> UserProfileResponse:
+    return await auth_service.atualizar_perfil(session, usuario, payload)
 
 
 # =============================================================================
