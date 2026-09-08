@@ -459,13 +459,37 @@ class Congenere(Base):
         BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
     )
     razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
-    cnpj: Mapped[Optional[str]] = mapped_column(String(14), nullable=True)
+    cnpj: Mapped[str] = mapped_column(String(14), nullable=False, index=True)
+    inscricao_estadual: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    
+    # Contatos
+    telefone: Mapped[str] = mapped_column(String(20), nullable=False)
+    email: Mapped[str] = mapped_column(String(100), nullable=False)
+    telefone_financeiro: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    email_financeiro: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Endereço
+    cep: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    logradouro: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    numero: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    complemento: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    bairro: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cidade: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    uf: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+
     logo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=func.now(), nullable=False)
+    atualizado_em: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("terminal_id", "cnpj", name="uq_congenere_terminal_cnpj"),
+    )
 
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="congeneres")
     operacoes: Mapped[List["OperacaoVeiculo"]] = relationship(back_populates="congenere")
+
 
 
 class Produto(Base):

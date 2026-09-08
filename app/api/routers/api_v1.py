@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.api.routers.auth import router as auth_router
 from app.api.routers.cadastro import router as cadastro_router
 from app.api.routers.usuarios import router as usuarios_router
+from app.api.routers.congeneres import router as congeneres_router
 from app.api.routers.uploads import router as uploads_router
 
 api_router = APIRouter()
@@ -15,6 +16,8 @@ async def health_check():
 api_router.include_router(cadastro_router)
 api_router.include_router(auth_router)
 api_router.include_router(usuarios_router)
+api_router.include_router(congeneres_router)
 api_router.include_router(uploads_router)
+
 
 

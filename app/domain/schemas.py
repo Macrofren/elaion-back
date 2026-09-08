@@ -326,4 +326,83 @@ class UsuarioTerminalResumoDTO(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# =============================================================================
+# 7. SCHEMAS: CONGÊNERES (DISTRIBUIDORAS PARCEIRAS DO TERMINAL)
+# =============================================================================
+
+class CongenereCreateDTO(BaseModel):
+    razao_social: str = Field(..., min_length=2, max_length=150, description="Razão Social da congênere")
+    cnpj: str = Field(
+        ...,
+        pattern=r"^\d{14}$",
+        description="CNPJ obrigatório sanitizado, contendo exatamente 14 dígitos numéricos"
+    )
+    telefone: str = Field(
+        ...,
+        min_length=8,
+        max_length=20,
+        description="Telefone de contato principal (apenas números)"
+    )
+    email: EmailStr = Field(..., description="E-mail principal para contato e envio de laudos/comprovantes")
+    
+    # Opcionais
+    inscricao_estadual: Optional[str] = Field(None, max_length=30)
+    telefone_financeiro: Optional[str] = Field(None, max_length=20)
+    email_financeiro: Optional[EmailStr] = None
+    cep: Optional[str] = Field(None, pattern=r"^\d{8}$", description="CEP com 8 dígitos numéricos")
+    logradouro: Optional[str] = Field(None, max_length=150)
+    numero: Optional[str] = Field(None, max_length=20)
+    complemento: Optional[str] = Field(None, max_length=100)
+    bairro: Optional[str] = Field(None, max_length=100)
+    cidade: Optional[str] = Field(None, max_length=100)
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    logo_url: Optional[str] = Field(None, max_length=500)
+    ativo: bool = Field(default=True)
+
+
+class CongenereUpdateDTO(BaseModel):
+    razao_social: Optional[str] = Field(None, min_length=2, max_length=150)
+    cnpj: Optional[str] = Field(None, pattern=r"^\d{14}$")
+    telefone: Optional[str] = Field(None, min_length=8, max_length=20)
+    email: Optional[EmailStr] = None
+    inscricao_estadual: Optional[str] = Field(None, max_length=30)
+    telefone_financeiro: Optional[str] = Field(None, max_length=20)
+    email_financeiro: Optional[EmailStr] = None
+    cep: Optional[str] = Field(None, pattern=r"^\d{8}$")
+    logradouro: Optional[str] = Field(None, max_length=150)
+    numero: Optional[str] = Field(None, max_length=20)
+    complemento: Optional[str] = Field(None, max_length=100)
+    bairro: Optional[str] = Field(None, max_length=100)
+    cidade: Optional[str] = Field(None, max_length=100)
+    uf: Optional[str] = Field(None, min_length=2, max_length=2)
+    logo_url: Optional[str] = Field(None, max_length=500)
+    ativo: Optional[bool] = None
+
+
+class CongenereResponseDTO(BaseModel):
+    id: int
+    terminal_id: int
+    razao_social: str
+    cnpj: str
+    inscricao_estadual: Optional[str] = None
+    telefone: str
+    email: str
+    telefone_financeiro: Optional[str] = None
+    email_financeiro: Optional[str] = None
+    cep: Optional[str] = None
+    logradouro: Optional[str] = None
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    uf: Optional[str] = None
+    logo_url: Optional[str] = None
+    ativo: bool
+    criado_em: datetime
+    atualizado_em: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+
 
