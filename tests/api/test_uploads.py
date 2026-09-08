@@ -21,13 +21,13 @@ async def test_upload_foto_perfil_valida(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_upload_congenere_png_obrigatorio(client: AsyncClient):
-    """Testa que congênere aceita somente PNG e rejeita outros formatos."""
-    fake_jpg = b"\xff\xd8\xff\xe0\x00\x10JFIF"
-    files_jpg = {"arquivo": ("logo.jpg", io.BytesIO(fake_jpg), "image/jpeg")}
-    res_fail = await client.post("/api/v1/uploads/imagem?tipo=congenere", files=files_jpg)
+async def test_upload_congenere_formatos_permitidos(client: AsyncClient):
+    """Testa que congênere rejeita formatos inválidos e aceita PNG/JPG."""
+    fake_gif = b"GIF89a"
+    files_gif = {"arquivo": ("logo.gif", io.BytesIO(fake_gif), "image/gif")}
+    res_fail = await client.post("/api/v1/uploads/imagem?tipo=congenere", files=files_gif)
     assert res_fail.status_code == 400
-    assert "apenas arquivos PNG são permitidos" in res_fail.json()["detail"]
+    assert "Formatos aceitos" in res_fail.json()["detail"]
 
     # Testa sucesso com PNG
     fake_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -37,3 +37,4 @@ async def test_upload_congenere_png_obrigatorio(client: AsyncClient):
     data = res_ok.json()
     assert data["tipo"] == "congenere"
     assert data["url"].startswith("/api/v1/uploads/congenere/")
+

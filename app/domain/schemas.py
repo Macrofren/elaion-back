@@ -6,7 +6,7 @@ Estruturados para Clean Architecture e fail-fast com Pydantic v2.
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, AliasChoices
 
 from app.domain.models import (
     AcaoAuditoria,
@@ -18,6 +18,7 @@ from app.domain.models import (
     StatusOperacao,
     TipoAcaoFuncionalidade,
     TipoColeta,
+    TipoCombustivel,
     TipoOperacao,
     TipoPlataforma,
     TipoUsuario,
@@ -330,6 +331,14 @@ class UsuarioTerminalResumoDTO(BaseModel):
 # 7. SCHEMAS: CONGÊNERES (DISTRIBUIDORAS PARCEIRAS DO TERMINAL)
 # =============================================================================
 
+class CongenereProdutoDTO(BaseModel):
+    combustivel: TipoCombustivel
+    aditivado: bool = False
+    cor: Optional[str] = Field(None, max_length=50)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CongenereCreateDTO(BaseModel):
     razao_social: str = Field(..., min_length=2, max_length=150, description="Razão Social da congênere")
     cnpj: str = Field(
@@ -358,6 +367,7 @@ class CongenereCreateDTO(BaseModel):
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     logo_url: Optional[str] = Field(None, max_length=500)
     ativo: bool = Field(default=True)
+    produtos: Optional[List[CongenereProdutoDTO]] = Field(default_factory=list)
 
 
 class CongenereUpdateDTO(BaseModel):
@@ -377,6 +387,7 @@ class CongenereUpdateDTO(BaseModel):
     uf: Optional[str] = Field(None, min_length=2, max_length=2)
     logo_url: Optional[str] = Field(None, max_length=500)
     ativo: Optional[bool] = None
+    produtos: Optional[List[CongenereProdutoDTO]] = None
 
 
 class CongenereResponseDTO(BaseModel):
@@ -398,11 +409,110 @@ class CongenereResponseDTO(BaseModel):
     uf: Optional[str] = None
     logo_url: Optional[str] = None
     ativo: bool
+    produtos: List[CongenereProdutoDTO] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("produtos", "produtos_operados"),
+    )
     criado_em: datetime
     atualizado_em: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
+class PaginatedCongeneresResponseDTO(BaseModel):
+    items: List[CongenereResponseDTO]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
+# =============================================================================
+# 8. SCHEMAS: TERMINAL (DADOS GERAIS E CONFIGURAÇÃO)
+# =============================================================================
+
+class TerminalDetalheDTO(BaseModel):
+    id: int
+    organizacao_id: int
+    codigo_terminal: str
+    razao_social: str
+    nome_fantasia: str
+    cnpj: str
+    inscricao_estadual: str
+    telefone: Optional[str] = None
+    telefone_financeiro: Optional[str] = None
+    email: Optional[str] = None
+    email_financeiro: Optional[str] = None
+    cep: Optional[str] = None
+    logradouro: Optional[str] = None
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    uf: Optional[str] = None
+    ativo: bool = True
+    criado_em: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TerminalGeralUpdateDTO(BaseModel):
+    codigo_terminal: Optional[str] = Field(None, max_length=50)
+    razao_social: Optional[str] = Field(None, min_length=2, max_length=150)
+    nome_fantasia: Optional[str] = Field(None, min_length=2, max_length=150)
+    cnpj: Optional[str] = Field(None, max_length=20)
+    inscricao_estadual: Optional[str] = Field(None, max_length=30)
+    telefone: Optional[str] = Field(None, max_length=20)
+    telefone_financeiro: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=100)
+    email_financeiro: Optional[str] = Field(None, max_length=100)
+    cep: Optional[str] = Field(None, max_length=20)
+    logradouro: Optional[str] = Field(None, max_length=150)
+    numero: Optional[str] = Field(None, max_length=20)
+    complemento: Optional[str] = Field(None, max_length=100)
+    bairro: Optional[str] = Field(None, max_length=100)
+    cidade: Optional[str] = Field(None, max_length=100)
+    uf: Optional[str] = Field(None, max_length=2)
+    ativo: Optional[bool] = None
+
+
+# =============================================================================
+# 9. SCHEMAS: LABORATÓRIOS DO TERMINAL
+# =============================================================================
+
+class LaboratorioCreateDTO(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=100, description="Nome do laboratório")
+    codigo: Optional[str] = Field(None, max_length=50, description="Código identificador (ex: LAB-01)")
+    is_proprio: bool = Field(True, description="Indica se é laboratório próprio do terminal ou terceirizado")
+    ativo: bool = Field(True, description="Status do laboratório")
+
+
+class LaboratorioUpdateDTO(BaseModel):
+    nome: Optional[str] = Field(None, min_length=1, max_length=100, description="Nome do laboratório")
+    codigo: Optional[str] = Field(None, max_length=50, description="Código identificador (ex: LAB-01)")
+    is_proprio: Optional[bool] = Field(None, description="Indica se é laboratório próprio ou terceirizado")
+    ativo: Optional[bool] = Field(None, description="Status do laboratório")
+
+
+class LaboratorioResponseDTO(BaseModel):
+    id: int
+    terminal_id: int
+    nome: str
+    codigo: Optional[str] = None
+    is_proprio: bool = True
+    ativo: bool = True
+    criado_em: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AtualizarTerminalLaboratoriosItemDTO(BaseModel):
+    id: Optional[int] = Field(None, description="ID do laboratório (omitir para cadastrar novo)")
+    nome: str = Field(..., min_length=1, max_length=100)
+    codigo: Optional[str] = Field(None, max_length=50)
+    is_proprio: bool = Field(True)
+    ativo: bool = Field(True)
+
+
+class AtualizarTerminalLaboratoriosRequestDTO(BaseModel):
+    laboratorios: List[AtualizarTerminalLaboratoriosItemDTO]

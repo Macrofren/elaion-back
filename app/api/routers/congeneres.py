@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import exige_permissao, get_db_session, resolver_terminal_ativo
 from app.domain.models import Usuario
-from app.domain.schemas import CongenereCreateDTO, CongenereResponseDTO, CongenereUpdateDTO
+from app.domain.schemas import (
+    CongenereCreateDTO,
+    CongenereResponseDTO,
+    CongenereUpdateDTO,
+    PaginatedCongeneresResponseDTO,
+)
 from app.services.congeneres_service import congeneres_service
 
 router = APIRouter(prefix="/congeneres", tags=["Gestão de Congêneres"])
@@ -46,23 +51,28 @@ async def cadastrar_congenere(
 
 @router.get(
     "",
-    response_model=List[CongenereResponseDTO],
+    response_model=PaginatedCongeneresResponseDTO,
     status_code=status.HTTP_200_OK,
-    summary="Listar Congêneres do Terminal",
+    summary="Listar Congêneres do Terminal (Paginado)",
     description=(
-        "Retorna a lista de congêneres cadastradas no terminal ativo. "
+        "Retorna a lista paginada de congêneres cadastradas no terminal ativo. "
         "Requer permissão 'sirac:config:congenere:visualizar' ou usuário Master."
     ),
 )
 async def listar_congeneres(
     request: Request,
     busca: Optional[str] = Query(None, description="Filtro textual livre por razão social, cnpj, email etc."),
+    page: int = Query(1, ge=1, description="Número da página"),
+    page_size: int = Query(6, ge=1, le=100, description="Quantidade de itens por página"),
     _usuario: Usuario = Depends(exige_permissao("sirac:config:congenere:visualizar")),
     session: AsyncSession = Depends(get_db_session),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
-) -> List[CongenereResponseDTO]:
+) -> PaginatedCongeneresResponseDTO:
     terminal_id = _obter_terminal_id(request, x_terminal_id)
-    return await congeneres_service.listar_congeneres(session, terminal_id, busca)
+    return await congeneres_service.listar_congeneres(
+        session, terminal_id, busca=busca, page=page, page_size=page_size
+    )
+
 
 
 @router.get(

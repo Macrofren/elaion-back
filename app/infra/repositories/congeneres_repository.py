@@ -3,6 +3,7 @@
 from typing import List, Optional
 
 from sqlalchemy import or_, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models import Congenere
@@ -12,7 +13,11 @@ class CongenereRepository:
     """Operações de banco de dados para a entidade Congenere vinculada ao terminal."""
 
     async def get_by_id(self, session: AsyncSession, congenere_id: int) -> Optional[Congenere]:
-        stmt = select(Congenere).where(Congenere.id == congenere_id)
+        stmt = (
+            select(Congenere)
+            .options(selectinload(Congenere.produtos_operados))
+            .where(Congenere.id == congenere_id)
+        )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -27,8 +32,15 @@ class CongenereRepository:
         return result.scalar_one_or_none()
 
     async def listar_por_terminal(
-        self, session: AsyncSession, terminal_id: int, busca: Optional[str] = None
-    ) -> List[Congenere]:
+        self,
+        session: AsyncSession,
+        terminal_id: int,
+        busca: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> tuple[List[Congenere], int]:
+        from sqlalchemy import func
+
         stmt = select(Congenere).where(Congenere.terminal_id == terminal_id)
 
         if busca:
@@ -50,9 +62,21 @@ class CongenereRepository:
 
             stmt = stmt.where(or_(*conditions))
 
-        stmt = stmt.order_by(Congenere.razao_social.asc())
+        # 1. Contagem total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_result = await session.execute(count_stmt)
+        total_count = total_result.scalar_one()
+
+        # 2. Ordenação e paginação (se informada)
+        stmt = stmt.options(selectinload(Congenere.produtos_operados)).order_by(Congenere.razao_social.asc())
+        if page is not None and page_size is not None:
+            offset = max(0, (page - 1) * page_size)
+            stmt = stmt.offset(offset).limit(page_size)
+
         result = await session.execute(stmt)
-        return list(result.scalars().all())
+        items = list(result.scalars().all())
+        return items, total_count
+
 
     async def criar(self, session: AsyncSession, terminal_id: int, dados: dict) -> Congenere:
         congenere = Congenere(terminal_id=terminal_id, **dados)

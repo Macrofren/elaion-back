@@ -4,6 +4,8 @@ from app.api.routers.cadastro import router as cadastro_router
 from app.api.routers.usuarios import router as usuarios_router
 from app.api.routers.congeneres import router as congeneres_router
 from app.api.routers.uploads import router as uploads_router
+from app.api.routers.terminais import router as terminais_router
+from app.api.routers.laboratorios import router as laboratorios_router
 
 api_router = APIRouter()
 
@@ -17,6 +19,8 @@ api_router.include_router(cadastro_router)
 api_router.include_router(auth_router)
 api_router.include_router(usuarios_router)
 api_router.include_router(congeneres_router)
+api_router.include_router(terminais_router)
+api_router.include_router(laboratorios_router)
 api_router.include_router(uploads_router)
 
 

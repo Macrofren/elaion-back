@@ -67,6 +67,14 @@ class CategoriaProduto(str, PyEnum):
     BIODIESEL = "BIODIESEL"
 
 
+class TipoCombustivel(str, PyEnum):
+    GASOLINA_A = "GASOLINA_A"
+    DIESEL_S10_A = "DIESEL_S10_A"
+    DIESEL_S500_A = "DIESEL_S500_A"
+    ETANOL_ANIDRO = "ETANOL_ANIDRO"
+    ETANOL_HIDRATADO = "ETANOL_HIDRATADO"
+
+
 class TipoPlataforma(str, PyEnum):
     DESCARGA = "DESCARGA"
     CARREGAMENTO = "CARREGAMENTO"
@@ -440,7 +448,11 @@ class Laboratorio(Base):
     )
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     codigo: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_proprio: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=func.now(), nullable=False
+    )
 
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="laboratorios")
@@ -489,7 +501,37 @@ class Congenere(Base):
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="congeneres")
     operacoes: Mapped[List["OperacaoVeiculo"]] = relationship(back_populates="congenere")
+    produtos_operados: Mapped[List["CongenereProduto"]] = relationship(
+        back_populates="congenere", cascade="all, delete-orphan", lazy="selectin"
+    )
 
+
+class CongenereProduto(Base):
+    """
+    Entidade: congenere_produto
+    Descrição: Combustíveis operados por cada congênere no terminal, com indicação de aditivação e cor.
+    """
+    __tablename__ = "congenere_produto"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    congenere_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("congenere.id", ondelete="CASCADE"), nullable=False
+    )
+    combustivel: Mapped[TipoCombustivel] = mapped_column(
+        Enum(TipoCombustivel, native_enum=False), nullable=False
+    )
+    aditivado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cor: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("congenere_id", "combustivel", name="uq_congenere_combustivel"),
+    )
+
+    # Relacionamentos
+    congenere: Mapped["Congenere"] = relationship(back_populates="produtos_operados")
+
+    def __repr__(self) -> str:
+        return f"<CongenereProduto(id={self.id}, congenere_id={self.congenere_id}, combustivel='{self.combustivel}', aditivado={self.aditivado}, cor='{self.cor}')>"
 
 
 class Produto(Base):

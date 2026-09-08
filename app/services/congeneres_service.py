@@ -6,8 +6,22 @@ from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.exceptions import ConflitoException, ItemNaoEncontradoException, RegraNegocioException
-from app.domain.models import Congenere
-from app.domain.schemas import CongenereCreateDTO, CongenereResponseDTO, CongenereUpdateDTO
+from app.domain.models import Congenere, CongenereProduto, TipoCombustivel
+from app.domain.schemas import (
+    CongenereCreateDTO,
+    CongenereResponseDTO,
+    CongenereUpdateDTO,
+    PaginatedCongeneresResponseDTO,
+)
+
+TODOS_COMBUSTIVEIS = [
+    TipoCombustivel.GASOLINA_A,
+    TipoCombustivel.DIESEL_S10_A,
+    TipoCombustivel.DIESEL_S500_A,
+    TipoCombustivel.ETANOL_ANIDRO,
+    TipoCombustivel.ETANOL_HIDRATADO,
+]
+
 from app.infra.repositories.congeneres_repository import congenere_repository
 from app.infra.repositories.terminal_repository import terminal_repository
 
@@ -74,7 +88,33 @@ class CongeneresService:
         }
 
         congenere = await congenere_repository.criar(session, terminal_id, dados)
+
+        # Mapeia produtos informados pelo frontend para extrair aditivação e cor
+        aditivados_map = {}
+        if dto.produtos:
+            for p in dto.produtos:
+                c_key = str(p.combustivel.value if hasattr(p.combustivel, "value") else p.combustivel)
+                aditivados_map[c_key] = p
+
+        for comb in TODOS_COMBUSTIVEIS:
+            c_str = str(comb.value if hasattr(comb, "value") else comb)
+            is_diesel = c_str.upper().startswith("DIESEL")
+            p_info = aditivados_map.get(c_str)
+            is_aditivado = bool(p_info.aditivado) if (p_info and not is_diesel) else False
+            cor_val = p_info.cor.strip() if (p_info and p_info.cor and is_aditivado) else None
+
+            session.add(
+                CongenereProduto(
+                    congenere_id=congenere.id,
+                    combustivel=comb,
+                    aditivado=is_aditivado,
+                    cor=cor_val,
+                )
+            )
+
+        await session.flush()
         await session.commit()
+        await session.refresh(congenere)
         return CongenereResponseDTO.model_validate(congenere)
 
 
@@ -83,9 +123,22 @@ class CongeneresService:
         session: AsyncSession,
         terminal_id: int,
         busca: Optional[str] = None,
-    ) -> List[CongenereResponseDTO]:
-        congeneres = await congenere_repository.listar_por_terminal(session, terminal_id, busca)
-        return [CongenereResponseDTO.model_validate(c) for c in congeneres]
+        page: int = 1,
+        page_size: int = 6,
+    ) -> PaginatedCongeneresResponseDTO:
+        items, total_count = await congenere_repository.listar_por_terminal(
+            session, terminal_id, busca, page=page, page_size=page_size
+        )
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+
+        return PaginatedCongeneresResponseDTO(
+            items=[CongenereResponseDTO.model_validate(c) for c in items],
+            total=total_count,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+        )
+
 
     async def obter_congenere_por_id(
         self,
@@ -152,8 +205,34 @@ class CongeneresService:
         if dto.ativo is not None:
             dados_atualizar["ativo"] = dto.ativo
 
+        if dto.produtos is not None:
+            congenere.produtos_operados.clear()
+
+            aditivados_map = {}
+            for p in dto.produtos:
+                c_key = str(p.combustivel.value if hasattr(p.combustivel, "value") else p.combustivel)
+                aditivados_map[c_key] = p
+
+            for comb in TODOS_COMBUSTIVEIS:
+                c_str = str(comb.value if hasattr(comb, "value") else comb)
+                is_diesel = c_str.upper().startswith("DIESEL")
+                p_info = aditivados_map.get(c_str)
+                is_aditivado = bool(p_info.aditivado) if (p_info and not is_diesel) else False
+                cor_val = p_info.cor.strip() if (p_info and p_info.cor and is_aditivado) else None
+
+                congenere.produtos_operados.append(
+                    CongenereProduto(
+                        congenere_id=congenere.id,
+                        combustivel=comb,
+                        aditivado=is_aditivado,
+                        cor=cor_val,
+                    )
+                )
+            await session.flush()
+
         atualizada = await congenere_repository.atualizar(session, congenere, dados_atualizar)
         await session.commit()
+        await session.refresh(atualizada)
         return CongenereResponseDTO.model_validate(atualizada)
 
 

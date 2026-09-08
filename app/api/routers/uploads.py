@@ -36,26 +36,21 @@ async def upload_imagem(
 ):
     """
     Realiza o upload de imagem para o storage dedicado.
-    - Para 'congenere': aceita EXCLUSIVAMENTE arquivos PNG (.png).
-    - Para 'perfil': aceita PNG, JPG, JPEG ou WEBP.
+    - Para 'congenere' e 'perfil': aceita PNG, JPG, JPEG ou WEBP.
     """
     nome_original = arquivo.filename or "imagem"
     extensao = os.path.splitext(nome_original)[1].lower()
     content_type = (arquivo.content_type or "").lower()
 
+    if extensao not in EXTENSOES_PERFIL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Formato de imagem inválido. Formatos aceitos: PNG, JPG, JPEG ou WEBP.",
+        )
+
     if tipo == "congenere":
-        if extensao != ".png" or (content_type and content_type != "image/png"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Para logo de congêneres, apenas arquivos PNG são permitidos.",
-            )
         target_dir = STORAGE_CONGENERE
     else:
-        if extensao not in EXTENSOES_PERFIL:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Formato de imagem inválido para foto de perfil. Formatos aceitos: PNG, JPG ou WEBP.",
-            )
         target_dir = STORAGE_PERFIL
 
     # Nome único seguro
