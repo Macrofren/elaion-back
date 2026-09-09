@@ -124,7 +124,7 @@ class CongeneresService:
         terminal_id: int,
         busca: Optional[str] = None,
         page: int = 1,
-        page_size: int = 6,
+        page_size: int = 10,
     ) -> PaginatedCongeneresResponseDTO:
         items, total_count = await congenere_repository.listar_por_terminal(
             session, terminal_id, busca, page=page, page_size=page_size
@@ -206,12 +206,15 @@ class CongeneresService:
             dados_atualizar["ativo"] = dto.ativo
 
         if dto.produtos is not None:
-            congenere.produtos_operados.clear()
-
             aditivados_map = {}
             for p in dto.produtos:
                 c_key = str(p.combustivel.value if hasattr(p.combustivel, "value") else p.combustivel)
                 aditivados_map[c_key] = p
+
+            existentes_map = {
+                str(p.combustivel.value if hasattr(p.combustivel, "value") else p.combustivel): p
+                for p in congenere.produtos_operados
+            }
 
             for comb in TODOS_COMBUSTIVEIS:
                 c_str = str(comb.value if hasattr(comb, "value") else comb)
@@ -220,14 +223,19 @@ class CongeneresService:
                 is_aditivado = bool(p_info.aditivado) if (p_info and not is_diesel) else False
                 cor_val = p_info.cor.strip() if (p_info and p_info.cor and is_aditivado) else None
 
-                congenere.produtos_operados.append(
-                    CongenereProduto(
-                        congenere_id=congenere.id,
-                        combustivel=comb,
-                        aditivado=is_aditivado,
-                        cor=cor_val,
+                if c_str in existentes_map:
+                    item = existentes_map[c_str]
+                    item.aditivado = is_aditivado
+                    item.cor = cor_val
+                else:
+                    congenere.produtos_operados.append(
+                        CongenereProduto(
+                            congenere_id=congenere.id,
+                            combustivel=comb,
+                            aditivado=is_aditivado,
+                            cor=cor_val,
+                        )
                     )
-                )
             await session.flush()
 
         atualizada = await congenere_repository.atualizar(session, congenere, dados_atualizar)

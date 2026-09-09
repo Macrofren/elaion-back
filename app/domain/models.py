@@ -75,6 +75,23 @@ class TipoCombustivel(str, PyEnum):
     ETANOL_HIDRATADO = "ETANOL_HIDRATADO"
 
 
+NOMES_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
+    TipoCombustivel.GASOLINA_A: "Gasolina A",
+    TipoCombustivel.DIESEL_S10_A: "Diesel S10 A",
+    TipoCombustivel.DIESEL_S500_A: "Diesel S500 A",
+    TipoCombustivel.ETANOL_ANIDRO: "Etanol Anidro",
+    TipoCombustivel.ETANOL_HIDRATADO: "Etanol Hidratado",
+}
+
+CODIGOS_ANP_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
+    TipoCombustivel.GASOLINA_A: "320101001",
+    TipoCombustivel.DIESEL_S10_A: "420101004",
+    TipoCombustivel.DIESEL_S500_A: "420102004",
+    TipoCombustivel.ETANOL_ANIDRO: "610101001",
+    TipoCombustivel.ETANOL_HIDRATADO: "610101002",
+}
+
+
 class TipoPlataforma(str, PyEnum):
     DESCARGA = "DESCARGA"
     CARREGAMENTO = "CARREGAMENTO"
@@ -551,8 +568,8 @@ class Produto(Base):
     descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relacionamentos
-    tanques: Mapped[List["Tanque"]] = relationship(back_populates="produto")
-    bicos: Mapped[List["Bico"]] = relationship(back_populates="produto")
+    tanques: Mapped[List["Tanque"]] = relationship(back_populates="produto_rel")
+    bicos: Mapped[List["Bico"]] = relationship(back_populates="produto_rel")
     terminais_vinculados: Mapped[List["TerminalProduto"]] = relationship(back_populates="produto")
 
     def __repr__(self) -> str:
@@ -618,8 +635,11 @@ class Tanque(Base):
     terminal_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("terminal.id", ondelete="CASCADE"), nullable=False
     )
-    produto_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    produto: Mapped[TipoCombustivel] = mapped_column(
+        Enum(TipoCombustivel, native_enum=False), default=TipoCombustivel.DIESEL_S10_A, nullable=False
+    )
+    produto_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="SET NULL"), nullable=True
     )
     identificador_tanque: Mapped[str] = mapped_column(String(50), nullable=False)
     capacidade_nominal_litros: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
@@ -629,13 +649,31 @@ class Tanque(Base):
 
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="tanques")
-    produto: Mapped["Produto"] = relationship(back_populates="tanques")
+    produto_rel: Mapped[Optional["Produto"]] = relationship(back_populates="tanques")
     vinculos_bicos: Mapped[List["BicoTanqueVinculo"]] = relationship(
         back_populates="tanque", cascade="all, delete-orphan"
     )
     alocacoes_comprovante: Mapped[List["ComprovanteTanqueAlocacao"]] = relationship(
         back_populates="tanque"
     )
+
+    @property
+    def produto_nome(self) -> str:
+        if self.produto in NOMES_COMBUSTIVEIS:
+            return NOMES_COMBUSTIVEIS[self.produto]
+        produto_rel = self.__dict__.get("produto_rel")
+        if produto_rel:
+            return produto_rel.nome
+        return str(self.produto) if self.produto else "Combustível"
+
+    @property
+    def produto_codigo_anp(self) -> Optional[str]:
+        if self.produto in CODIGOS_ANP_COMBUSTIVEIS:
+            return CODIGOS_ANP_COMBUSTIVEIS[self.produto]
+        produto_rel = self.__dict__.get("produto_rel")
+        if produto_rel:
+            return produto_rel.codigo_anp
+        return None
 
     def __repr__(self) -> str:
         return f"<Tanque(id={self.id}, identificador='{self.identificador_tanque}', volume={self.volume_atual_litros})>"
@@ -655,8 +693,14 @@ class Bico(Base):
     plataforma_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("plataforma.id", ondelete="CASCADE"), nullable=False
     )
-    produto_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("produto.id", ondelete="RESTRICT"), nullable=False
+    tipo_operacao: Mapped[TipoOperacao] = mapped_column(
+        Enum(TipoOperacao, native_enum=False), default=TipoOperacao.CARREGAMENTO, nullable=False
+    )
+    produto: Mapped[Optional[TipoCombustivel]] = mapped_column(
+        Enum(TipoCombustivel, native_enum=False), default=None, nullable=True
+    )
+    produto_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("produto.id", ondelete="SET NULL"), nullable=True
     )
     identificador_bico: Mapped[str] = mapped_column(String(50), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -664,13 +708,66 @@ class Bico(Base):
     # Relacionamentos
     terminal: Mapped["Terminal"] = relationship(back_populates="bicos")
     plataforma: Mapped["Plataforma"] = relationship(back_populates="bicos")
-    produto: Mapped["Produto"] = relationship(back_populates="bicos")
+    produto_rel: Mapped[Optional["Produto"]] = relationship(back_populates="bicos")
     vinculos_tanques: Mapped[List["BicoTanqueVinculo"]] = relationship(
         back_populates="bico", cascade="all, delete-orphan"
     )
     alocacoes_comprovante: Mapped[List["ComprovanteTanqueAlocacao"]] = relationship(
         back_populates="bico"
     )
+
+    @property
+    def plataforma_identificador(self) -> str:
+        plataforma = self.__dict__.get("plataforma")
+        if plataforma:
+            return plataforma.identificador
+        return ""
+
+    @property
+    def produtos_operados(self) -> List[str]:
+        vinculos = self.__dict__.get("vinculos_tanques")
+        if not vinculos:
+            return []
+        nomes: List[str] = []
+        for v in vinculos:
+            tanque = v.__dict__.get("tanque")
+            if v.ativo and tanque and tanque.produto_nome:
+                if tanque.produto_nome not in nomes:
+                    nomes.append(tanque.produto_nome)
+        return nomes
+
+    @property
+    def produto_nome(self) -> str:
+        if self.produtos_operados:
+            return ", ".join(self.produtos_operados)
+        if self.produto in NOMES_COMBUSTIVEIS:
+            return NOMES_COMBUSTIVEIS[self.produto]
+        produto_rel = self.__dict__.get("produto_rel")
+        if produto_rel:
+            return produto_rel.nome
+        return ""
+
+    @property
+    def tanque_ids(self) -> List[int]:
+        vinculos = self.__dict__.get("vinculos_tanques")
+        if not vinculos:
+            return []
+        return [v.tanque_id for v in vinculos if v.ativo]
+
+    @property
+    def tanques_identificadores(self) -> List[str]:
+        vinculos = self.__dict__.get("vinculos_tanques")
+        if not vinculos:
+            return []
+        nomes: List[str] = []
+        for v in vinculos:
+            tanque = v.__dict__.get("tanque")
+            if v.ativo and tanque:
+                nomes.append(tanque.identificador_tanque)
+        return nomes
+
+    def __repr__(self) -> str:
+        return f"<Bico(id={self.id}, identificador='{self.identificador_bico}', terminal_id={self.terminal_id})>"
 
 
 class BicoTanqueVinculo(Base):

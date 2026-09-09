@@ -111,8 +111,7 @@ class TerminalService:
 
         atualizado = await terminal_repository.atualizar(session, terminal, dados_atualizar)
         await session.commit()
-        await session.refresh(atualizado)
-        return TerminalDetalheDTO.model_validate(atualizado)
+        return await self.obter_terminal(session, terminal_id)
 
 
 terminal_service = TerminalService()

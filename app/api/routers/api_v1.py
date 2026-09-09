@@ -6,6 +6,9 @@ from app.api.routers.congeneres import router as congeneres_router
 from app.api.routers.uploads import router as uploads_router
 from app.api.routers.terminais import router as terminais_router
 from app.api.routers.laboratorios import router as laboratorios_router
+from app.api.routers.plataformas import router as plataformas_router
+from app.api.routers.tanques import router as tanques_router
+from app.api.routers.bicos import router as bicos_router
 
 api_router = APIRouter()
 
@@ -21,6 +24,9 @@ api_router.include_router(usuarios_router)
 api_router.include_router(congeneres_router)
 api_router.include_router(terminais_router)
 api_router.include_router(laboratorios_router)
+api_router.include_router(plataformas_router)
+api_router.include_router(tanques_router)
+api_router.include_router(bicos_router)
 api_router.include_router(uploads_router)
 
 

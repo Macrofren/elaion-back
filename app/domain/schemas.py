@@ -452,6 +452,9 @@ class TerminalDetalheDTO(BaseModel):
     uf: Optional[str] = None
     ativo: bool = True
     criado_em: Optional[datetime] = None
+    plataformas: List["PlataformaResponseDTO"] = Field(default_factory=list)
+    tanques: List["TanqueResponseDTO"] = Field(default_factory=list)
+    bicos: List["BicoResponseDTO"] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -516,3 +519,164 @@ class AtualizarTerminalLaboratoriosItemDTO(BaseModel):
 
 class AtualizarTerminalLaboratoriosRequestDTO(BaseModel):
     laboratorios: List[AtualizarTerminalLaboratoriosItemDTO]
+
+
+# =============================================================================
+# 10. SCHEMAS: PLATAFORMAS DE OPERAÇÃO DO TERMINAL
+# =============================================================================
+
+class PlataformaCreateDTO(BaseModel):
+    identificador: str = Field(..., min_length=1, max_length=50, description="Identificador da plataforma (ex: PL-01)")
+    nome: Optional[str] = Field(None, max_length=100, description="Nome descritivo da plataforma/baia")
+    tipo: TipoPlataforma = Field(TipoPlataforma.CARREGAMENTO, description="Tipo operacional da plataforma")
+    ativo: bool = Field(True, description="Status da plataforma")
+
+
+class PlataformaUpdateDTO(BaseModel):
+    identificador: Optional[str] = Field(None, min_length=1, max_length=50, description="Identificador da plataforma")
+    nome: Optional[str] = Field(None, max_length=100, description="Nome descritivo da plataforma/baia")
+    tipo: Optional[TipoPlataforma] = Field(None, description="Tipo operacional da plataforma")
+    ativo: Optional[bool] = Field(None, description="Status da plataforma")
+
+
+class PlataformaResponseDTO(BaseModel):
+    id: int
+    terminal_id: int
+    identificador: str
+    nome: Optional[str] = None
+    tipo: TipoPlataforma
+    ativo: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AtualizarTerminalPlataformasItemDTO(BaseModel):
+    id: Optional[int] = Field(None, description="ID da plataforma (omitir para cadastrar nova)")
+    identificador: str = Field(..., min_length=1, max_length=50)
+    nome: Optional[str] = Field(None, max_length=100)
+    tipo: TipoPlataforma = Field(TipoPlataforma.CARREGAMENTO)
+    ativo: bool = Field(True)
+
+
+class AtualizarTerminalPlataformasRequestDTO(BaseModel):
+    plataformas: List[AtualizarTerminalPlataformasItemDTO]
+
+
+# =============================================================================
+# 11. SCHEMAS: TANQUES DE ARMAZENAMENTO DO TERMINAL
+# =============================================================================
+
+class TanqueCreateDTO(BaseModel):
+    produto: TipoCombustivel = Field(..., description="Enum do combustível (ex: DIESEL_S10_A)")
+    produto_id: Optional[int] = Field(None, description="ID do produto (legado/opcional)")
+    identificador_tanque: str = Field(..., min_length=1, max_length=50, description="Identificador único no terminal (ex: TQ-101)")
+    capacidade_operacional_litros: Decimal = Field(..., gt=0, description="Capacidade máxima operacional em litros")
+    capacidade_nominal_litros: Optional[Decimal] = Field(None, gt=0, description="Capacidade física nominal (se omitido, assume o valor operacional)")
+    volume_atual_litros: Optional[Decimal] = Field(Decimal("0.00"), ge=0, description="Volume inicial em litros (opcional, gerenciado por medição/telemetria)")
+    ativo: bool = Field(True, description="Status do tanque no terminal")
+
+
+class TanqueUpdateDTO(BaseModel):
+    produto: Optional[TipoCombustivel] = Field(None, description="Enum do combustível (ex: DIESEL_S10_A)")
+    produto_id: Optional[int] = Field(None, description="ID do produto (legado/opcional)")
+    identificador_tanque: Optional[str] = Field(None, min_length=1, max_length=50, description="Identificador do tanque")
+    capacidade_operacional_litros: Optional[Decimal] = Field(None, gt=0, description="Capacidade máxima operacional em litros")
+    capacidade_nominal_litros: Optional[Decimal] = Field(None, gt=0, description="Capacidade física nominal em litros")
+    volume_atual_litros: Optional[Decimal] = Field(None, ge=0, description="Ajuste manual de volume atual (se permitido)")
+    ativo: Optional[bool] = Field(None, description="Status do tanque")
+
+
+class TanqueResponseDTO(BaseModel):
+    id: int
+    terminal_id: int
+    produto: TipoCombustivel = Field(..., description="Enum do combustível associado")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    produto_nome: str = Field(..., description="Nome do produto cadastrado (ex: Diesel S10 A)")
+    produto_codigo_anp: Optional[str] = Field(None, description="Código ANP do combustível")
+    identificador_tanque: str
+    capacidade_nominal_litros: Decimal
+    capacidade_operacional_litros: Decimal
+    volume_atual_litros: Decimal = Decimal("0.00")
+    ativo: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AtualizarTerminalTanquesItemDTO(BaseModel):
+    id: Optional[int] = Field(None, description="ID do tanque existente (omitir para novo cadastro)")
+    produto: TipoCombustivel = Field(..., description="Enum do combustível (ex: DIESEL_S10_A)")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    identificador_tanque: str = Field(..., min_length=1, max_length=50, description="Identificador do tanque (ex: TQ-101)")
+    capacidade_operacional_litros: Decimal = Field(..., gt=0, description="Capacidade operacional em litros")
+    capacidade_nominal_litros: Optional[Decimal] = Field(None, description="Capacidade nominal em litros")
+    volume_atual_litros: Optional[Decimal] = Field(Decimal("0.00"), description="Volume atual (opcional, mantido por compatibilidade)")
+    ativo: bool = Field(True, description="Status de ativação do tanque")
+
+
+class AtualizarTerminalTanquesRequestDTO(BaseModel):
+    tanques: List[AtualizarTerminalTanquesItemDTO] = Field(
+        ..., description="Lista completa de tanques a serem sincronizados com o terminal"
+    )
+
+
+# =============================================================================
+# 12. SCHEMAS: BICOS E BRAÇOS DE CONEXÃO DO TERMINAL
+# =============================================================================
+
+class BicoCreateDTO(BaseModel):
+    plataforma_id: int = Field(..., gt=0, description="ID da plataforma/baia onde o bico está instalado")
+    tipo_operacao: TipoOperacao = Field(TipoOperacao.CARREGAMENTO, description="Tipo de operação do bico (CARREGAMENTO ou DESCARGA)")
+    produto: Optional[TipoCombustivel] = Field(None, description="Enum do combustível (legado/opcional)")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    identificador_bico: str = Field(..., min_length=1, max_length=50, description="Identificador único no terminal (ex: BC-01)")
+    tanque_ids: List[int] = Field(..., min_length=1, description="Lista de IDs dos tanques conectados (obrigatório ao menos 1)")
+    ativo: bool = Field(True, description="Status do bico")
+
+
+class BicoUpdateDTO(BaseModel):
+    plataforma_id: Optional[int] = Field(None, gt=0, description="ID da plataforma/baia")
+    tipo_operacao: Optional[TipoOperacao] = Field(None, description="Tipo de operação do bico")
+    produto: Optional[TipoCombustivel] = Field(None, description="Enum do combustível operado")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    identificador_bico: Optional[str] = Field(None, min_length=1, max_length=50, description="Identificador do bico")
+    tanque_ids: Optional[List[int]] = Field(None, min_length=1, description="Lista de IDs dos tanques conectados")
+    ativo: Optional[bool] = Field(None, description="Status do bico")
+
+
+class BicoResponseDTO(BaseModel):
+    id: int
+    terminal_id: int
+    plataforma_id: int
+    plataforma_identificador: str
+    tipo_operacao: TipoOperacao = Field(TipoOperacao.CARREGAMENTO, description="Tipo de operação do bico")
+    produtos_operados: List[str] = Field(default_factory=list, description="Lista dos combustíveis presentes nos tanques vinculados")
+    produto: Optional[TipoCombustivel] = Field(None, description="Enum do combustível (opcional/legado)")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    produto_nome: Optional[str] = Field(None, description="Combustíveis vinculados (formatado)")
+    tanque_ids: List[int] = Field(default_factory=list)
+    tanques_identificadores: List[str] = Field(default_factory=list)
+    identificador_bico: str
+    ativo: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AtualizarTerminalBicosItemDTO(BaseModel):
+    id: Optional[int] = Field(None, description="ID do bico existente (omitir para novo cadastro)")
+    plataforma_id: int = Field(..., gt=0, description="ID da plataforma/baia")
+    tipo_operacao: TipoOperacao = Field(TipoOperacao.CARREGAMENTO, description="Tipo de operação do bico")
+    produto: Optional[TipoCombustivel] = Field(None, description="Enum do combustível")
+    produto_id: Optional[int] = Field(None, description="ID legado do produto")
+    identificador_bico: str = Field(..., min_length=1, max_length=50, description="Identificador do bico (ex: BC-01)")
+    tanque_ids: List[int] = Field(..., min_length=1, description="Lista de IDs dos tanques vinculados (obrigatório ao menos 1)")
+    ativo: bool = Field(True, description="Status de ativação do bico")
+
+
+class AtualizarTerminalBicosRequestDTO(BaseModel):
+    bicos: List[AtualizarTerminalBicosItemDTO] = Field(
+        ..., description="Lista completa de bicos a serem sincronizados com o terminal"
+    )
+
+
+TerminalDetalheDTO.model_rebuild()
+

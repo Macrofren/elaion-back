@@ -63,7 +63,7 @@ async def listar_congeneres(
     request: Request,
     busca: Optional[str] = Query(None, description="Filtro textual livre por razão social, cnpj, email etc."),
     page: int = Query(1, ge=1, description="Número da página"),
-    page_size: int = Query(6, ge=1, le=100, description="Quantidade de itens por página"),
+    page_size: int = Query(10, ge=1, le=100, description="Quantidade de itens por página"),
     _usuario: Usuario = Depends(exige_permissao("sirac:config:congenere:visualizar")),
     session: AsyncSession = Depends(get_db_session),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),

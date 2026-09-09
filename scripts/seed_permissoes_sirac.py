@@ -1,4 +1,4 @@
-﻿"""
+"""
 Script de Seed: Catálogo de Módulos e Permissões do SIRAC.
 Insere no banco de dados o módulo SIRAC e as 22 funcionalidades operacionais
 compatíveis com o Drawer 'Novo Colaborador' do Frontend.
@@ -138,8 +138,13 @@ PERMISSOES_SIRAC_SEED = [
         "tipo_acao": TipoAcaoFuncionalidade.VISUALIZAR,
     },
     {
+        "chave": "sirac:config:terminal:tanques_registrar",
+        "nome": "Registrar tanques, bicos e plataformas",
+        "tipo_acao": TipoAcaoFuncionalidade.CRIAR,
+    },
+    {
         "chave": "sirac:config:terminal:tanques_editar",
-        "nome": "Registrar e editar tanques, bicos e plataformas",
+        "nome": "Editar tanques, bicos e plataformas",
         "tipo_acao": TipoAcaoFuncionalidade.EDITAR,
     },
     {

@@ -3,16 +3,28 @@
 from typing import Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models import Terminal
+from app.domain.models import Bico, BicoTanqueVinculo, Tanque, Terminal
 
 
 class TerminalRepository:
     """Operações de banco da entidade Terminal (unidade operacional física)."""
 
     async def get_by_id(self, session: AsyncSession, terminal_id: int) -> Optional[Terminal]:
-        stmt = select(Terminal).where(Terminal.id == terminal_id)
+        stmt = (
+            select(Terminal)
+            .options(
+                selectinload(Terminal.plataformas),
+                selectinload(Terminal.tanques),
+                selectinload(Terminal.bicos).selectinload(Bico.plataforma),
+                selectinload(Terminal.bicos)
+                .selectinload(Bico.vinculos_tanques)
+                .selectinload(BicoTanqueVinculo.tanque),
+            )
+            .where(Terminal.id == terminal_id)
+        )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
