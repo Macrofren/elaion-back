@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, AliasChoices
 from app.domain.models import (
     AcaoAuditoria,
     CategoriaProduto,
+    EstadoVeiculo,
     PapelUsuario,
     ParecerLaudo,
     StatusAmostra,
@@ -676,6 +677,150 @@ class AtualizarTerminalBicosRequestDTO(BaseModel):
     bicos: List[AtualizarTerminalBicosItemDTO] = Field(
         ..., description="Lista completa de bicos a serem sincronizados com o terminal"
     )
+
+
+# =============================================================================
+# 11. SCHEMAS: CONTROLE DE ACESSO AO TERMINAL
+# =============================================================================
+
+class ControleAcessoFiltrosDTO(BaseModel):
+    """Parâmetros de filtro e busca para a listagem do controle de acesso."""
+    data: date = Field(
+        default_factory=date.today,
+        description="Data de referência para as operações (default: data atual)",
+    )
+    busca: Optional[str] = Field(
+        None,
+        description="Busca textual por motorista, placa, transportadora ou distribuidora congênere",
+    )
+    estados: Optional[List[EstadoVeiculo]] = Field(
+        None,
+        description="Filtro por macro-estados do veículo na portaria (ex: AGUARDANDO, ENTRADA, COLETA, SAIDA, CANCELADO)",
+    )
+    operacoes: Optional[List[TipoOperacao]] = Field(
+        None,
+        description="Filtro por tipo de operação (CARREGAMENTO, DESCARGA)",
+    )
+    produtos: Optional[List[TipoCombustivel]] = Field(
+        None,
+        description="Filtro por combustíveis presentes nos compartimentos",
+    )
+    page: int = Field(1, ge=1, description="Número da página (1-based)")
+    page_size: int = Field(10, ge=1, le=100, description="Quantidade de registros por página")
+
+
+# Alias mantido para compatibilidade
+ControleAcessoListagemRequestDTO = ControleAcessoFiltrosDTO
+
+
+class ControleAcessoItemDTO(BaseModel):
+    """Representação de um registro de veículo/operação na portaria do terminal."""
+    id: int = Field(..., description="ID da operação do veículo")
+    terminal_id: int = Field(..., description="ID do terminal ativo")
+    estado: EstadoVeiculo = Field(
+        EstadoVeiculo.AGUARDANDO,
+        description="Macro-estado do veículo na portaria (AGUARDANDO, ENTRADA, COLETA, SAIDA, CANCELADO)",
+    )
+    status_operacao: StatusOperacao = Field(
+        StatusOperacao.AGUARDANDO_PORTARIA,
+        description="Status operacional detalhado do pátio/laboratório",
+    )
+    tipo_operacao: TipoOperacao = Field(
+        TipoOperacao.CARREGAMENTO,
+        description="Tipo de operação: CARREGAMENTO ou DESCARGA",
+    )
+    data_hora: datetime = Field(
+        ...,
+        description="Data e hora do registro ou entrada do veículo",
+    )
+    motorista: str = Field(..., description="Nome completo do motorista")
+    placa: str = Field(
+        ...,
+        validation_alias=AliasChoices("placa", "placa_veiculo"),
+        description="Placa do cavalo mecânico / veículo",
+    )
+    numero_nf: str = Field(
+        ...,
+        validation_alias=AliasChoices("numero_nf", "numero_nota_fiscal"),
+        description="Número da nota fiscal de transporte",
+    )
+    congenere: str = Field(..., description="Nome da distribuidora congênere")
+    congenere_id: Optional[int] = Field(None, description="ID da congênere")
+    transportadora: str = Field(
+        ...,
+        validation_alias=AliasChoices("transportadora", "nome_transportadora"),
+        description="Nome da transportadora",
+    )
+    is_propria: bool = Field(
+        False,
+        validation_alias=AliasChoices("is_propria", "is_transportadora_propria"),
+        description="Indica se o frete é por frota própria",
+    )
+    produtos: List[TipoCombustivel] = Field(
+        default_factory=list,
+        description="Lista de combustíveis transportados nos compartimentos",
+    )
+    volume_nf: Decimal = Field(
+        ...,
+        description="Volume total faturado na nota fiscal (em litros)",
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "id": 1,
+                "terminal_id": 1,
+                "estado": "AGUARDANDO",
+                "status_operacao": "AGUARDANDO_PORTARIA",
+                "tipo_operacao": "CARREGAMENTO",
+                "data_hora": "2026-09-10T08:30:00Z",
+                "motorista": "Juliana Ferreira",
+                "placa": "PQR2345",
+                "numero_nf": "000128",
+                "congenere": "Larco",
+                "congenere_id": 2,
+                "transportadora": "Transportadora Rodobrás",
+                "is_propria": False,
+                "produtos": ["DIESEL_S10_A", "ETANOL_HIDRATADO"],
+                "volume_nf": "9800.00",
+            }
+        },
+    )
+
+
+# Alias mantido para compatibilidade com o rascunho anterior
+ControleAcessoResponseDTO = ControleAcessoItemDTO
+
+
+class PaginatedControleAcessoResponseDTO(BaseModel):
+    """Envelope paginado de registros do controle de acesso."""
+    items: List[ControleAcessoItemDTO] = Field(
+        default_factory=list, description="Lista paginada de registros"
+    )
+    total: int = Field(..., description="Total geral de registros que atendem aos filtros")
+    page: int = Field(..., ge=1, description="Página atual")
+    page_size: int = Field(..., ge=1, description="Tamanho da página")
+    total_pages: int = Field(..., ge=0, description="Total de páginas disponíveis")
+
+
+class ControleAcessoContagensResponseDTO(BaseModel):
+    """Contadores para os seletores de abas e resumo operacional do dia."""
+    AGUARDANDO: int = Field(0, description="Veículos agendados aguardando portaria")
+    ENTRADA: int = Field(0, description="Veículos que deram entrada no pátio")
+    COLETA: int = Field(0, description="Veículos em etapa de coleta/amostragem")
+    SAIDA: int = Field(0, description="Veículos que concluíram a operação e saíram")
+    CANCELADO: int = Field(0, description="Operações canceladas/rejeitadas")
+    total: int = Field(0, description="Total geral de veículos registrados no dia")
+
+
+class TransicaoEstadoControleAcessoRequestDTO(BaseModel):
+    """Payload para transição de estado do veículo pela portaria."""
+    estado: EstadoVeiculo = Field(
+        ..., description="Novo estado para o qual o veículo deve transitar (ex: ENTRADA, SAIDA)"
+    )
+    observacao: Optional[str] = Field(None, description="Observação opcional da portaria")
 
 
 TerminalDetalheDTO.model_rebuild()

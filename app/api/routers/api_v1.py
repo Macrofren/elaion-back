@@ -9,6 +9,7 @@ from app.api.routers.laboratorios import router as laboratorios_router
 from app.api.routers.plataformas import router as plataformas_router
 from app.api.routers.tanques import router as tanques_router
 from app.api.routers.bicos import router as bicos_router
+from app.api.routers.operacao import router as operacao_router
 
 api_router = APIRouter()
 
@@ -28,6 +29,7 @@ api_router.include_router(plataformas_router)
 api_router.include_router(tanques_router)
 api_router.include_router(bicos_router)
 api_router.include_router(uploads_router)
+api_router.include_router(operacao_router)
 
 
 

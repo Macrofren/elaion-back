@@ -114,6 +114,14 @@ class StatusOperacao(str, PyEnum):
     CANCELADO = "CANCELADO"
 
 
+class EstadoVeiculo(str, PyEnum):
+    AGUARDANDO = "AGUARDANDO"
+    ENTRADA = "ENTRADA"
+    COLETA = "COLETA"
+    SAIDA = "SAIDA"
+    CANCELADO = "CANCELADO"
+
+
 class TipoColeta(str, PyEnum):
     CORRIDO = "CORRIDO"
     TOPO = "TOPO"
