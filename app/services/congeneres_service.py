@@ -15,7 +15,7 @@ from app.domain.schemas import (
 )
 
 TODOS_COMBUSTIVEIS = [
-    TipoCombustivel.GASOLINA_A,
+    TipoCombustivel.GASOLINA_C,
     TipoCombustivel.DIESEL_S10_A,
     TipoCombustivel.DIESEL_S500_A,
     TipoCombustivel.ETANOL_ANIDRO,

@@ -24,6 +24,11 @@ async def lifespan(app: FastAPI):
         )
         await conn.execute(
             text(
+                "ALTER TABLE operacao_veiculo ALTER COLUMN origem_destino DROP NOT NULL;"
+            )
+        )
+        await conn.execute(
+            text(
                 "UPDATE alembic_version SET version_num = 'b2c3d4e5f6a7' WHERE version_num = 'a1b2c3d4e5f6';"
             )
         )

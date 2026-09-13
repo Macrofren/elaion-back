@@ -68,7 +68,7 @@ class CategoriaProduto(str, PyEnum):
 
 
 class TipoCombustivel(str, PyEnum):
-    GASOLINA_A = "GASOLINA_A"
+    GASOLINA_C = "GASOLINA_C"
     DIESEL_S10_A = "DIESEL_S10_A"
     DIESEL_S500_A = "DIESEL_S500_A"
     ETANOL_ANIDRO = "ETANOL_ANIDRO"
@@ -76,7 +76,7 @@ class TipoCombustivel(str, PyEnum):
 
 
 NOMES_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
-    TipoCombustivel.GASOLINA_A: "Gasolina A",
+    TipoCombustivel.GASOLINA_C: "Gasolina C",
     TipoCombustivel.DIESEL_S10_A: "Diesel S10 A",
     TipoCombustivel.DIESEL_S500_A: "Diesel S500 A",
     TipoCombustivel.ETANOL_ANIDRO: "Etanol Anidro",
@@ -84,7 +84,7 @@ NOMES_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
 }
 
 CODIGOS_ANP_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
-    TipoCombustivel.GASOLINA_A: "320101001",
+    TipoCombustivel.GASOLINA_C: "320101001",
     TipoCombustivel.DIESEL_S10_A: "420101004",
     TipoCombustivel.DIESEL_S500_A: "420102004",
     TipoCombustivel.ETANOL_ANIDRO: "610101001",
@@ -102,6 +102,16 @@ class TipoOperacao(str, PyEnum):
     DESCARGA = "DESCARGA"
     CARREGAMENTO = "CARREGAMENTO"
 
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            val_upper = value.strip().upper()
+            if val_upper in ("DESCARREGAR", "DESCARGA"):
+                return cls.DESCARGA
+            if val_upper in ("CARREGAR", "CARREGAMENTO", "CARGA"):
+                return cls.CARREGAMENTO
+        return None
+
 
 class StatusOperacao(str, PyEnum):
     AGUARDANDO_PORTARIA = "AGUARDANDO_PORTARIA"
@@ -115,11 +125,17 @@ class StatusOperacao(str, PyEnum):
 
 
 class EstadoVeiculo(str, PyEnum):
-    AGUARDANDO = "AGUARDANDO"
+    FILA = "FILA"
     ENTRADA = "ENTRADA"
     COLETA = "COLETA"
     SAIDA = "SAIDA"
     CANCELADO = "CANCELADO"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.upper() in ("AGUARDANDO", "AGUARDANDO_PORTARIA"):
+            return cls.FILA
+        return None
 
 
 class TipoColeta(str, PyEnum):
@@ -827,7 +843,7 @@ class OperacaoVeiculo(Base):
     placa_veiculo: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     nome_motorista: Mapped[str] = mapped_column(String(150), nullable=False)
     numero_nota_fiscal: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    origem_destino: Mapped[str] = mapped_column(String(150), nullable=False)
+    origem_destino: Mapped[Optional[str]] = mapped_column(String(150), nullable=True, default=None)
     tipo_operacao: Mapped[TipoOperacao] = mapped_column(
         Enum(TipoOperacao, native_enum=False), default=TipoOperacao.DESCARGA, nullable=False
     )
@@ -867,8 +883,36 @@ class OperacaoVeiculo(Base):
         back_populates="operacao"
     )
 
+    @property
+    def estado(self) -> "EstadoVeiculo":
+        if self.historico_status:
+            ultimo = sorted(self.historico_status, key=lambda h: h.id or 0, reverse=True)[0]
+            st = str(ultimo.status_novo).upper()
+            if st in ("FILA", "AGUARDANDO"):
+                return EstadoVeiculo.FILA
+            if st == "ENTRADA":
+                return EstadoVeiculo.ENTRADA
+            if st == "COLETA":
+                return EstadoVeiculo.COLETA
+            if st == "SAIDA":
+                return EstadoVeiculo.SAIDA
+            if st == "CANCELADO":
+                return EstadoVeiculo.CANCELADO
+
+        map_st = {
+            StatusOperacao.AGUARDANDO_PORTARIA: EstadoVeiculo.FILA,
+            StatusOperacao.EM_AMOSTRAGEM: EstadoVeiculo.COLETA,
+            StatusOperacao.EM_ANALISE_LAB: EstadoVeiculo.COLETA,
+            StatusOperacao.APROVADO_OPERACAO: EstadoVeiculo.ENTRADA,
+            StatusOperacao.EM_OPERACAO: EstadoVeiculo.ENTRADA,
+            StatusOperacao.CONCLUIDO: EstadoVeiculo.SAIDA,
+            StatusOperacao.CANCELADO: EstadoVeiculo.CANCELADO,
+            StatusOperacao.REPROVADO: EstadoVeiculo.CANCELADO,
+        }
+        return map_st.get(self.status_operacao, EstadoVeiculo.FILA)
+
     def __repr__(self) -> str:
-        return f"<OperacaoVeiculo(id={self.id}, placa='{self.placa_trator}', tipo='{self.tipo_operacao}', status='{self.status_operacao}')>"
+        return f"<OperacaoVeiculo(id={self.id}, placa='{self.placa_veiculo}', tipo='{self.tipo_operacao}', status='{self.status_operacao}')>"
 
 
 class OperacaoCompartimento(Base):
@@ -899,6 +943,17 @@ class OperacaoCompartimento(Base):
     amostras: Mapped[List["Amostra"]] = relationship(
         back_populates="compartimento", cascade="all, delete-orphan"
     )
+
+    @property
+    def tipo_combustivel(self) -> TipoCombustivel:
+        if self.produto:
+            anp_map = {v: k for k, v in CODIGOS_ANP_COMBUSTIVEIS.items()}
+            if self.produto.codigo_anp in anp_map:
+                return anp_map[self.produto.codigo_anp]
+            for comb, nome in NOMES_COMBUSTIVEIS.items():
+                if nome.lower() in self.produto.nome.lower():
+                    return comb
+        return TipoCombustivel.GASOLINA_C
 
 
 class OperacaoStatusHistorico(Base):

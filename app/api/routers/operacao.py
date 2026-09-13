@@ -1,10 +1,9 @@
 """
 Roteador da API v1 para Controle de Acesso e Operações de Pátio do Terminal.
-Contrato de API definido para visualização no FastAPI Docs (Swagger UI/ReDoc).
+Implementação completa integrada ao banco de dados via Clean Architecture (operacao_service).
 """
 
-from datetime import date, datetime, timezone
-from decimal import Decimal
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -15,27 +14,35 @@ from app.api.deps import (
     get_db_session,
     resolver_terminal_ativo,
 )
-from app.domain.models import (
-    EstadoVeiculo,
-    StatusOperacao,
-    TipoCombustivel,
-    TipoOperacao,
-    Usuario,
-)
+from app.domain.models import Usuario
 from app.domain.schemas import (
+    AtualizarVeiculoDescargaRequestDTO,
+    AvancarColetaRequestDTO,
+    CancelarAcessoRequestDTO,
     ControleAcessoContagensResponseDTO,
     ControleAcessoItemDTO,
-    ControleAcessoResponseDTO,
+    EntradaVeiculoRequestDTO,
+    NovoVeiculoDescargaRequestDTO,
     PaginatedControleAcessoResponseDTO,
+    RegistroDescargaRequestDTO,
+    RetornarEstadoRequestDTO,
+    SaidaVeiculoRequestDTO,
     TransicaoEstadoControleAcessoRequestDTO,
 )
+from app.services.operacao_service import operacao_service
 
 router = APIRouter(tags=["Controle de Acesso"])
 
 PERMISSOES_VISUALIZAR = [
     "sirac:ca:visualizar_listagem",
+    "sirac:ca:visualizar_detalhes",
 ]
 PERMISSOES_ALTERAR_STATUS = [
+    "sirac:ca:alterar_status",
+]
+PERMISSOES_REGISTRAR = [
+    "sirac:ca:registrar_veiculo",
+    "sirac:ca:editar_veiculo",
     "sirac:ca:alterar_status",
 ]
 
@@ -50,96 +57,6 @@ def _obter_terminal_id(request: Request, x_terminal_id: Optional[int]) -> int:
     return terminal_id
 
 
-# Mock / Contrato de amostra para exibição no Swagger docs antes da implementação do banco
-_SAMPLE_ITEMS = [
-    ControleAcessoItemDTO(
-        id=1,
-        terminal_id=1,
-        estado=EstadoVeiculo.AGUARDANDO,
-        status_operacao=StatusOperacao.AGUARDANDO_PORTARIA,
-        tipo_operacao=TipoOperacao.CARREGAMENTO,
-        data_hora=datetime(2026, 9, 10, 8, 30, tzinfo=timezone.utc),
-        motorista="Juliana Ferreira",
-        placa="PQR2345",
-        numero_nf="000128",
-        congenere="Larco",
-        congenere_id=2,
-        transportadora="Transportadora Rodobrás",
-        is_propria=False,
-        produtos=[TipoCombustivel.DIESEL_S10_A, TipoCombustivel.ETANOL_HIDRATADO],
-        volume_nf=Decimal("9800.00"),
-    ),
-    ControleAcessoItemDTO(
-        id=2,
-        terminal_id=1,
-        estado=EstadoVeiculo.AGUARDANDO,
-        status_operacao=StatusOperacao.AGUARDANDO_PORTARIA,
-        tipo_operacao=TipoOperacao.DESCARGA,
-        data_hora=datetime(2026, 9, 10, 9, 15, tzinfo=timezone.utc),
-        motorista="Roberto Carlos Mendes",
-        placa="STU7890",
-        numero_nf="000131",
-        congenere="Vibra Energia",
-        congenere_id=1,
-        transportadora="Própria",
-        is_propria=True,
-        produtos=[TipoCombustivel.GASOLINA_A],
-        volume_nf=Decimal("15200.00"),
-    ),
-    ControleAcessoItemDTO(
-        id=3,
-        terminal_id=1,
-        estado=EstadoVeiculo.ENTRADA,
-        status_operacao=StatusOperacao.EM_OPERACAO,
-        tipo_operacao=TipoOperacao.CARREGAMENTO,
-        data_hora=datetime(2026, 9, 10, 7, 45, tzinfo=timezone.utc),
-        motorista="Marcos Antônio Lima",
-        placa="VWX3456",
-        numero_nf="000133",
-        congenere="Raízen",
-        congenere_id=3,
-        transportadora="Expresso Nordeste",
-        is_propria=False,
-        produtos=[TipoCombustivel.DIESEL_S500_A],
-        volume_nf=Decimal("22500.00"),
-    ),
-    ControleAcessoItemDTO(
-        id=4,
-        terminal_id=1,
-        estado=EstadoVeiculo.COLETA,
-        status_operacao=StatusOperacao.EM_AMOSTRAGEM,
-        tipo_operacao=TipoOperacao.DESCARGA,
-        data_hora=datetime(2026, 9, 10, 8, 10, tzinfo=timezone.utc),
-        motorista="Paulo Henrique Souza",
-        placa="YZA6789",
-        numero_nf="000136",
-        congenere="Ipiranga",
-        congenere_id=4,
-        transportadora="TransLog Brasil",
-        is_propria=False,
-        produtos=[TipoCombustivel.ETANOL_ANIDRO, TipoCombustivel.GASOLINA_A],
-        volume_nf=Decimal("12000.00"),
-    ),
-    ControleAcessoItemDTO(
-        id=5,
-        terminal_id=1,
-        estado=EstadoVeiculo.SAIDA,
-        status_operacao=StatusOperacao.CONCLUIDO,
-        tipo_operacao=TipoOperacao.CARREGAMENTO,
-        data_hora=datetime(2026, 9, 10, 6, 30, tzinfo=timezone.utc),
-        motorista="Carlos Eduardo Rocha",
-        placa="BCD1234",
-        numero_nf="000122",
-        congenere="Larco",
-        congenere_id=2,
-        transportadora="Rodoviário Cargas",
-        is_propria=False,
-        produtos=[TipoCombustivel.DIESEL_S10_A],
-        volume_nf=Decimal("30000.00"),
-    ),
-]
-
-
 @router.get(
     "/controle-acesso",
     response_model=PaginatedControleAcessoResponseDTO,
@@ -147,31 +64,51 @@ _SAMPLE_ITEMS = [
     summary="Listar registros de controle de acesso ao terminal",
     description=(
         "Retorna a listagem paginada dos veículos e operações de pátio para o terminal ativo. "
-        "Permite busca textual, filtros por macro-estado, tipo de operação e combustíveis. "
-        "Por padrão, filtra as operações da data atual (hoje)."
+        "Permite busca textual (motorista, placa, NF, transportadora, congênere), filtros por período, "
+        "macro-estados da portaria (FILA, ENTRADA, COLETA, SAIDA, CANCELADO) e combustíveis."
     ),
 )
 async def listar_controle_acesso(
     request: Request,
-    data: date = Query(
-        default_factory=date.today,
-        description="Data de referência para a listagem (default: data atual de hoje)",
+    data: Optional[date] = Query(
+        None,
+        description="Data de referência única (filtra apenas esta data)",
+    ),
+    data_inicio: Optional[str] = Query(
+        None,
+        description="Data inicial do período (YYYY-MM-DD)",
+    ),
+    data_fim: Optional[str] = Query(
+        None,
+        description="Data final do período (YYYY-MM-DD)",
     ),
     busca: Optional[str] = Query(
         None,
-        description="Busca textual por motorista, placa, transportadora ou congênere",
+        description="Busca textual por motorista, placa, NF, transportadora ou distribuidora congênere",
     ),
-    estados: Optional[List[EstadoVeiculo]] = Query(
+    estados: Optional[List[str]] = Query(
         None,
-        description="Filtrar por macro-estados da portaria (ex: AGUARDANDO, ENTRADA, COLETA, SAIDA, CANCELADO)",
+        description="Filtro por macro-estados (ex: FILA, ENTRADA, COLETA, SAIDA, CANCELADO)",
     ),
-    operacoes: Optional[List[TipoOperacao]] = Query(
+    estado: Optional[str] = Query(
         None,
-        description="Filtrar por tipo de operação (CARREGAMENTO, DESCARGA)",
+        description="Filtro por estado único ou separado por vírgula",
     ),
-    produtos: Optional[List[TipoCombustivel]] = Query(
+    operacoes: Optional[List[str]] = Query(
+        None,
+        description="Filtrar por tipo de operação (DESCARGA, CARREGAMENTO)",
+    ),
+    operacao: Optional[str] = Query(
+        None,
+        description="Filtro por tipo de operação único ou separado por vírgula",
+    ),
+    produtos: Optional[List[str]] = Query(
         None,
         description="Filtrar por produtos/combustíveis transportados",
+    ),
+    produto: Optional[str] = Query(
+        None,
+        description="Filtro por produto único ou separado por vírgula",
     ),
     page: int = Query(1, ge=1, description="Número da página (inicia em 1)"),
     page_size: int = Query(10, ge=1, le=100, description="Quantidade de registros por página"),
@@ -179,48 +116,48 @@ async def listar_controle_acesso(
     _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_VISUALIZAR)),
     session: AsyncSession = Depends(get_db_session),
 ) -> PaginatedControleAcessoResponseDTO:
-    """Contrato de API para listagem paginada do controle de acesso."""
+    """Listagem paginada do controle de acesso consultada diretamente do banco de dados."""
     terminal_id = _obter_terminal_id(request, x_terminal_id)
 
-    # Filtragem em memória sobre o mock até que o repositório/service seja implementado
-    itens_filtrados = [item for item in _SAMPLE_ITEMS if item.terminal_id == terminal_id]
-
-    if busca:
-        termo = busca.strip().lower()
-        itens_filtrados = [
-            item
-            for item in itens_filtrados
-            if termo in item.motorista.lower()
-            or termo in item.placa.lower()
-            or termo in item.transportadora.lower()
-            or termo in item.congenere.lower()
-            or termo in item.numero_nf.lower()
-        ]
-
+    # Harmonizar parâmetros separados por vírgula
+    estados_consolidados: List[str] = []
     if estados:
-        itens_filtrados = [item for item in itens_filtrados if item.estado in estados]
+        for e in estados:
+            estados_consolidados.extend([x.strip() for x in e.split(",") if x.strip()])
+    if estado:
+        estados_consolidados.extend([x.strip() for x in estado.split(",") if x.strip()])
 
+    operacoes_consolidadas: List[str] = []
     if operacoes:
-        itens_filtrados = [item for item in itens_filtrados if item.tipo_operacao in operacoes]
+        for op in operacoes:
+            operacoes_consolidadas.extend([x.strip() for x in op.split(",") if x.strip()])
+    if operacao:
+        operacoes_consolidadas.extend([x.strip() for x in operacao.split(",") if x.strip()])
 
+    produtos_consolidados: List[str] = []
     if produtos:
-        itens_filtrados = [
-            item
-            for item in itens_filtrados
-            if any(p in produtos for p in item.produtos)
-        ]
+        for p in produtos:
+            produtos_consolidados.extend([x.strip() for x in p.split(",") if x.strip()])
+    if produto:
+        produtos_consolidados.extend([x.strip() for x in produto.split(",") if x.strip()])
 
-    total = len(itens_filtrados)
-    total_pages = max(1, (total + page_size - 1) // page_size) if total > 0 else 1
-    start_idx = (page - 1) * page_size
-    itens_paginados = itens_filtrados[start_idx : start_idx + page_size]
+    d_inicio = data_inicio
+    d_fim = data_fim
+    if data and not d_inicio and not d_fim:
+        d_inicio = data.isoformat()
+        d_fim = data.isoformat()
 
-    return PaginatedControleAcessoResponseDTO(
-        items=itens_paginados,
-        total=total,
+    return await operacao_service.listar_veiculos(
+        session=session,
+        terminal_id=terminal_id,
+        busca=busca,
+        estados=estados_consolidados or None,
+        operacoes=operacoes_consolidadas or None,
+        produtos=produtos_consolidados or None,
+        data_inicio=d_inicio,
+        data_fim=d_fim,
         page=page,
         page_size=page_size,
-        total_pages=total_pages,
     )
 
 
@@ -230,54 +167,127 @@ async def listar_controle_acesso(
     status_code=status.HTTP_200_OK,
     summary="Obter contadores por estado para as abas do controle de acesso",
     description=(
-        "Retorna as contagens consolidadas de veículos em cada estado (Agendados, Entraram, "
-        "Coleta, Saíram, Cancelados e Total) para exibição nos badges das abas."
+        "Retorna as contagens consolidadas de veículos em cada estado (FILA/AGUARDANDO, ENTRADA, "
+        "COLETA, SAIDA, CANCELADO e TOTAL) para alimentação em tempo real dos badges das abas."
     ),
 )
 async def obter_contagens_controle_acesso(
     request: Request,
-    data: date = Query(
-        default_factory=date.today,
-        description="Data de referência para contagem (default: data atual de hoje)",
+    data: Optional[date] = Query(
+        None,
+        description="Data de referência única para contagem",
+    ),
+    data_inicio: Optional[str] = Query(
+        None,
+        description="Data inicial para contagem (YYYY-MM-DD)",
+    ),
+    data_fim: Optional[str] = Query(
+        None,
+        description="Data final para contagem (YYYY-MM-DD)",
+    ),
+    operacao: Optional[str] = Query(
+        None,
+        description="Filtrar por tipo de operação (DESCARGA ou CARREGAMENTO)",
     ),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
     _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_VISUALIZAR)),
     session: AsyncSession = Depends(get_db_session),
 ) -> ControleAcessoContagensResponseDTO:
-    """Contrato de API para contagens dos seletores de abas."""
+    """Contagens dos seletores de abas consultadas diretamente do banco de dados."""
     terminal_id = _obter_terminal_id(request, x_terminal_id)
-    itens = [item for item in _SAMPLE_ITEMS if item.terminal_id == terminal_id]
 
-    contagens = {
-        EstadoVeiculo.AGUARDANDO: 0,
-        EstadoVeiculo.ENTRADA: 0,
-        EstadoVeiculo.COLETA: 0,
-        EstadoVeiculo.SAIDA: 0,
-        EstadoVeiculo.CANCELADO: 0,
-    }
-    for item in itens:
-        if item.estado in contagens:
-            contagens[item.estado] += 1
+    d_inicio = data_inicio
+    d_fim = data_fim
+    if data and not d_inicio and not d_fim:
+        d_inicio = data.isoformat()
+        d_fim = data.isoformat()
 
-    return ControleAcessoContagensResponseDTO(
-        AGUARDANDO=contagens[EstadoVeiculo.AGUARDANDO],
-        ENTRADA=contagens[EstadoVeiculo.ENTRADA],
-        COLETA=contagens[EstadoVeiculo.COLETA],
-        SAIDA=contagens[EstadoVeiculo.SAIDA],
-        CANCELADO=contagens[EstadoVeiculo.CANCELADO],
-        total=len(itens),
+    return await operacao_service.obter_contagens(
+        session=session,
+        terminal_id=terminal_id,
+        data_inicio=d_inicio,
+        data_fim=d_fim,
+        tipo_operacao_str=operacao,
+    )
+
+
+@router.get(
+    "/controle-acesso/{id}",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Obter detalhes completos do veículo no controle de acesso",
+    description="Retorna todas as informações do veículo, compartimentos e histórico auditado para o Drawer de Detalhes.",
+)
+async def obter_detalhes_veiculo(
+    id: int,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_VISUALIZAR)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.obter_detalhes_veiculo(
+        session=session, operacao_id=id, terminal_id=terminal_id
+    )
+
+
+@router.post(
+    "/controle-acesso",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_201_CREATED,
+    summary="Registrar novo veículo na portaria (Fila)",
+    description=(
+        "Registra a chegada de um caminhão-tanque na portaria do terminal com estado inicial FILA. "
+        "Suporta payload em formato plano ou agrupado por produto (enviado pelo frontend)."
+    ),
+)
+async def registrar_veiculo(
+    payload: NovoVeiculoDescargaRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_REGISTRAR)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.cadastrar_veiculo_descarga(
+        session=session,
+        terminal_id=terminal_id,
+        usuario_id=_usuario.id,
+        dto=payload,
+    )
+
+
+@router.put(
+    "/controle-acesso/{id}",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Atualizar dados cadastrais do veículo na fila",
+    description="Permite a edição dos dados cadastrais exclusivamente enquanto o veículo estiver no estado FILA.",
+)
+async def atualizar_veiculo(
+    id: int,
+    payload: AtualizarVeiculoDescargaRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_REGISTRAR)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.atualizar_veiculo_fila(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario_id=_usuario.id,
+        dto=payload,
     )
 
 
 @router.patch(
     "/controle-acesso/{id}/estado",
-    response_model=ControleAcessoResponseDTO,
+    response_model=ControleAcessoItemDTO,
     status_code=status.HTTP_200_OK,
-    summary="Transitar estado do veículo na portaria (Ação rápida)",
-    description=(
-        "Permite que o operador de portaria realize a transição rápida de estado "
-        "(ex: de AGUARDANDO para ENTRADA, ou de ENTRADA para SAIDA)."
-    ),
+    summary="Transitar estado do veículo na portaria",
+    description="Executa a transição de estado validada pela máquina de estados (ex: FILA -> ENTRADA -> SAIDA).",
 )
 async def transitar_estado_veiculo(
     id: int,
@@ -286,22 +296,174 @@ async def transitar_estado_veiculo(
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
     _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
     session: AsyncSession = Depends(get_db_session),
-) -> ControleAcessoResponseDTO:
-    """Contrato de API para transição rápida de estado na portaria."""
+) -> ControleAcessoItemDTO:
     terminal_id = _obter_terminal_id(request, x_terminal_id)
-
-    item = next((it for it in _SAMPLE_ITEMS if it.id == id and it.terminal_id == terminal_id), None)
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Operação/veículo de ID {id} não encontrado no terminal ativo.",
-        )
-
-    # Retorna o item com o novo estado simulado
-    item_atualizado = item.model_copy(
-        update={
-            "estado": payload.estado,
-            "data_hora": datetime.now(timezone.utc),
-        }
+    return await operacao_service.transitar_estado(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        novo_estado=payload.estado,
+        motivo=payload.motivo or payload.observacao,
+        bafometro_resultado=payload.bafometro_resultado,
+        bafometro_valor=payload.bafometro_valor,
     )
-    return item_atualizado
+
+
+@router.patch(
+    "/controle-acesso/{id}/entrada",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Registrar entrada com teste de bafômetro",
+    description="Valida o teste de bafômetro e transiciona o veículo de FILA para ENTRADA.",
+)
+async def registrar_entrada(
+    id: int,
+    payload: EntradaVeiculoRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    from app.domain.models import EstadoVeiculo
+
+    return await operacao_service.transitar_estado(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        novo_estado=EstadoVeiculo.ENTRADA,
+        motivo=payload.observacao,
+        bafometro_resultado=payload.bafometro_resultado,
+        bafometro_valor=payload.bafometro_valor,
+    )
+
+
+@router.patch(
+    "/controle-acesso/{id}/avancar-coleta",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Avançar veículo para etapa de amostragem/coleta no pátio",
+    description="Permitido exclusivamente a partir de ENTRADA.",
+)
+async def avancar_para_coleta(
+    id: int,
+    payload: AvancarColetaRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    from app.domain.models import EstadoVeiculo
+
+    return await operacao_service.transitar_estado(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        novo_estado=EstadoVeiculo.COLETA,
+        motivo=payload.observacao,
+    )
+
+
+@router.patch(
+    "/controle-acesso/{id}/saida",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Registrar saída do veículo após término da operação",
+    description="Finaliza a operação e registra a liberação na portaria (preenchendo data/hora de saída).",
+)
+async def registrar_saida(
+    id: int,
+    payload: SaidaVeiculoRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    from app.domain.models import EstadoVeiculo
+
+    return await operacao_service.transitar_estado(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        novo_estado=EstadoVeiculo.SAIDA,
+        motivo=payload.observacao,
+    )
+
+
+@router.patch(
+    "/controle-acesso/{id}/retornar-estado",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Retornar veículo para o estado anterior com justificativa obrigatória",
+    description="Permite reversão justificada: de COLETA para ENTRADA, ou de ENTRADA para FILA.",
+)
+async def retornar_estado_veiculo(
+    id: int,
+    payload: RetornarEstadoRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.retornar_estado_anterior(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        motivo=payload.motivo,
+    )
+
+
+@router.patch(
+    "/controle-acesso/{id}/cancelar",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_200_OK,
+    summary="Cancelar acesso do veículo na portaria",
+    description="Cancela a operação do veículo enquanto este estiver na FILA ou na ENTRADA.",
+)
+async def cancelar_acesso_veiculo(
+    id: int,
+    payload: CancelarAcessoRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_ALTERAR_STATUS)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.cancelar_acesso(
+        session=session,
+        operacao_id=id,
+        terminal_id=terminal_id,
+        usuario=_usuario,
+        motivo=payload.motivo,
+    )
+
+
+@router.post(
+    "/controle-acesso/descarga",
+    response_model=ControleAcessoItemDTO,
+    status_code=status.HTTP_201_CREATED,
+    summary="Registrar novo veículo de descarga (Alias legado)",
+    description="Endpoint mantido por compatibilidade; direciona para a criação de veículo na fila.",
+)
+async def registrar_veiculo_descarga(
+    payload: RegistroDescargaRequestDTO,
+    request: Request,
+    x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
+    _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_REGISTRAR)),
+    session: AsyncSession = Depends(get_db_session),
+) -> ControleAcessoItemDTO:
+    terminal_id = _obter_terminal_id(request, x_terminal_id)
+    return await operacao_service.cadastrar_veiculo_descarga(
+        session=session,
+        terminal_id=terminal_id,
+        usuario_id=_usuario.id,
+        dto=payload,
+    )

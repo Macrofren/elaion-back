@@ -36,7 +36,7 @@ async def test_congeneres_diesel_nunca_aditivado():
 
     prod_s10 = CongenereProdutoDTO(combustivel=TipoCombustivel.DIESEL_S10_A, aditivado=True)
     prod_s500 = CongenereProdutoDTO(combustivel=TipoCombustivel.DIESEL_S500_A, aditivado=True)
-    prod_gas = CongenereProdutoDTO(combustivel=TipoCombustivel.GASOLINA_A, aditivado=True)
+    prod_gas = CongenereProdutoDTO(combustivel=TipoCombustivel.GASOLINA_C, aditivado=True)
     prod_eta = CongenereProdutoDTO(combustivel=TipoCombustivel.ETANOL_HIDRATADO, aditivado=True)
 
     for p in [prod_s10, prod_s500, prod_gas, prod_eta]:

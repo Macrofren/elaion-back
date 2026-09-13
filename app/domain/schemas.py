@@ -3,15 +3,17 @@ Schemas Pydantic (v2) - DTOs para validação de entrada e saída.
 Estruturados para Clean Architecture e fail-fast com Pydantic v2.
 """
 
+import re
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, AliasChoices
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, AliasChoices, field_validator, model_validator
 
 from app.domain.models import (
     AcaoAuditoria,
     CategoriaProduto,
     EstadoVeiculo,
+    NOMES_COMBUSTIVEIS,
     PapelUsuario,
     ParecerLaudo,
     StatusAmostra,
@@ -685,9 +687,17 @@ class AtualizarTerminalBicosRequestDTO(BaseModel):
 
 class ControleAcessoFiltrosDTO(BaseModel):
     """Parâmetros de filtro e busca para a listagem do controle de acesso."""
-    data: date = Field(
-        default_factory=date.today,
-        description="Data de referência para as operações (default: data atual)",
+    data: Optional[date] = Field(
+        None,
+        description="Data de referência para as operações",
+    )
+    data_inicio: Optional[str] = Field(
+        None,
+        description="Data inicial do período de busca (YYYY-MM-DD)",
+    )
+    data_fim: Optional[str] = Field(
+        None,
+        description="Data final do período de busca (YYYY-MM-DD)",
     )
     busca: Optional[str] = Field(
         None,
@@ -695,7 +705,7 @@ class ControleAcessoFiltrosDTO(BaseModel):
     )
     estados: Optional[List[EstadoVeiculo]] = Field(
         None,
-        description="Filtro por macro-estados do veículo na portaria (ex: AGUARDANDO, ENTRADA, COLETA, SAIDA, CANCELADO)",
+        description="Filtro por macro-estados do veículo na portaria (ex: FILA, ENTRADA, COLETA, SAIDA, CANCELADO)",
     )
     operacoes: Optional[List[TipoOperacao]] = Field(
         None,
@@ -713,27 +723,107 @@ class ControleAcessoFiltrosDTO(BaseModel):
 ControleAcessoListagemRequestDTO = ControleAcessoFiltrosDTO
 
 
+class CompartimentoProdutoDTO(BaseModel):
+    """Volume de um compartimento individual agrupado por produto."""
+    volume_nf: Decimal = Field(..., gt=0, description="Volume declarado na NF em litros")
+
+
+class ProdutoCompartimentosDTO(BaseModel):
+    """Agrupamento de compartimentos por combustível (padrão frontend)."""
+    produto: TipoCombustivel = Field(..., description="Tipo do combustível")
+    compartimentos: List[CompartimentoProdutoDTO] = Field(
+        default_factory=list, description="Lista de compartimentos para este produto"
+    )
+
+
+class CompartimentoDescargaInputDTO(BaseModel):
+    """Especificação física de um compartimento do caminhão-tanque na descarga."""
+    numero: int = Field(
+        ...,
+        ge=1,
+        le=10,
+        description="Número identificador do compartimento no caminhão (1 a 10)",
+        examples=[1],
+    )
+    produto: TipoCombustivel = Field(
+        ...,
+        description="Combustível contido no compartimento (ex: DIESEL_S10_A, GASOLINA_C)",
+        examples=[TipoCombustivel.DIESEL_S10_A],
+    )
+    volume_nf: Decimal = Field(
+        ...,
+        gt=0,
+        description="Volume constante na nota fiscal para este compartimento em litros",
+        examples=[Decimal("5000.00")],
+    )
+    capacidade_litros: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        validation_alias=AliasChoices("capacidade_litros", "capacidade"),
+        description="Capacidade volumétrica nominal do compartimento em litros (opcional)",
+        examples=[Decimal("5000.00")],
+    )
+
+
+class CompartimentoDetalheDTO(BaseModel):
+    """Detalhe do compartimento físico na visualização e nas respostas."""
+    id: Optional[int] = Field(None, description="ID do registro do compartimento")
+    numero: int = Field(..., description="Número ordinal do compartimento")
+    produto: TipoCombustivel = Field(..., description="Tipo do combustível")
+    nome_produto: Optional[str] = Field(None, description="Nome legível do produto")
+    volume_nf: Decimal = Field(..., description="Volume faturado na NF (litros)")
+    capacidade: Optional[Decimal] = Field(
+        None,
+        validation_alias=AliasChoices("capacidade", "capacidade_litros"),
+        description="Capacidade volumétrica nominal do compartimento",
+    )
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+# Alias mantido para compatibilidade
+CompartimentoDescargaItemDTO = CompartimentoDetalheDTO
+
+
+class HistoricoEstadoItemDTO(BaseModel):
+    """Linha do tempo e auditoria das transições de status da operação."""
+    id: Optional[int] = Field(None, description="ID do evento de histórico")
+    estado: str = Field(..., description="Estado do veículo (FILA, ENTRADA, COLETA, SAIDA, CANCELADO)")
+    status_anterior: Optional[str] = Field(None, description="Status anterior antes da transição")
+    data_hora: Optional[datetime] = Field(None, description="Data e hora em que a transição ocorreu")
+    observacao: Optional[str] = Field(None, description="Justificativa ou observação registrada")
+    usuario: Optional[str] = Field(None, description="Nome do operador que realizou a ação")
+    is_retorno: bool = Field(False, description="Indica se a transição foi uma reversão de status")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ControleAcessoItemDTO(BaseModel):
-    """Representação de um registro de veículo/operação na portaria do terminal."""
+    """Representação canônica e enriquecida de um registro de veículo/operação na portaria."""
     id: int = Field(..., description="ID da operação do veículo")
     terminal_id: int = Field(..., description="ID do terminal ativo")
     estado: EstadoVeiculo = Field(
-        EstadoVeiculo.AGUARDANDO,
-        description="Macro-estado do veículo na portaria (AGUARDANDO, ENTRADA, COLETA, SAIDA, CANCELADO)",
+        EstadoVeiculo.FILA,
+        description="Macro-estado do veículo na portaria (FILA, ENTRADA, COLETA, SAIDA, CANCELADO)",
     )
     status_operacao: StatusOperacao = Field(
         StatusOperacao.AGUARDANDO_PORTARIA,
         description="Status operacional detalhado do pátio/laboratório",
     )
     tipo_operacao: TipoOperacao = Field(
-        TipoOperacao.CARREGAMENTO,
+        TipoOperacao.DESCARGA,
         description="Tipo de operação: CARREGAMENTO ou DESCARGA",
     )
     data_hora: datetime = Field(
         ...,
+        validation_alias=AliasChoices("data_hora", "data_hora_entrada"),
         description="Data e hora do registro ou entrada do veículo",
     )
-    motorista: str = Field(..., description="Nome completo do motorista")
+    motorista: str = Field(
+        ...,
+        validation_alias=AliasChoices("motorista", "nome_motorista"),
+        description="Nome completo do motorista",
+    )
     placa: str = Field(
         ...,
         validation_alias=AliasChoices("placa", "placa_veiculo"),
@@ -753,8 +843,17 @@ class ControleAcessoItemDTO(BaseModel):
     )
     is_propria: bool = Field(
         False,
-        validation_alias=AliasChoices("is_propria", "is_transportadora_propria"),
+        validation_alias=AliasChoices("is_propria", "is_transportadora_propria", "transportadora_propria"),
         description="Indica se o frete é por frota própria",
+    )
+    observacao_geral: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("observacao_geral", "observacao"),
+        description="Observações operacionais da portaria",
+    )
+    motivo_cancelamento: Optional[str] = Field(
+        None,
+        description="Motivo do cancelamento caso o acesso tenha sido cancelado",
     )
     produtos: List[TipoCombustivel] = Field(
         default_factory=list,
@@ -764,33 +863,31 @@ class ControleAcessoItemDTO(BaseModel):
         ...,
         description="Volume total faturado na nota fiscal (em litros)",
     )
+    capacidade_total: Optional[Decimal] = Field(
+        None,
+        description="Capacidade volumétrica total somada dos compartimentos",
+    )
+    numero_compartimentos: Optional[int] = Field(
+        None,
+        validation_alias=AliasChoices("numero_compartimentos", "quantidade_compartimentos"),
+        description="Total de compartimentos físicos cadastrados",
+    )
+    compartimentos: List[CompartimentoDetalheDTO] = Field(
+        default_factory=list,
+        description="Detalhes de cada compartimento físico do veículo",
+    )
+    historico_estados: List[HistoricoEstadoItemDTO] = Field(
+        default_factory=list,
+        description="Linha do tempo de auditoria de estados com identificação de usuários",
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,
-        json_schema_extra={
-            "example": {
-                "id": 1,
-                "terminal_id": 1,
-                "estado": "AGUARDANDO",
-                "status_operacao": "AGUARDANDO_PORTARIA",
-                "tipo_operacao": "CARREGAMENTO",
-                "data_hora": "2026-09-10T08:30:00Z",
-                "motorista": "Juliana Ferreira",
-                "placa": "PQR2345",
-                "numero_nf": "000128",
-                "congenere": "Larco",
-                "congenere_id": 2,
-                "transportadora": "Transportadora Rodobrás",
-                "is_propria": False,
-                "produtos": ["DIESEL_S10_A", "ETANOL_HIDRATADO"],
-                "volume_nf": "9800.00",
-            }
-        },
     )
 
 
-# Alias mantido para compatibilidade com o rascunho anterior
+# Alias mantido para compatibilidade
 ControleAcessoResponseDTO = ControleAcessoItemDTO
 
 
@@ -807,7 +904,8 @@ class PaginatedControleAcessoResponseDTO(BaseModel):
 
 class ControleAcessoContagensResponseDTO(BaseModel):
     """Contadores para os seletores de abas e resumo operacional do dia."""
-    AGUARDANDO: int = Field(0, description="Veículos agendados aguardando portaria")
+    FILA: int = Field(0, description="Veículos aguardando na fila da portaria")
+    AGUARDANDO: int = Field(0, description="Alias para retrocompatibilidade com FILA")
     ENTRADA: int = Field(0, description="Veículos que deram entrada no pátio")
     COLETA: int = Field(0, description="Veículos em etapa de coleta/amostragem")
     SAIDA: int = Field(0, description="Veículos que concluíram a operação e saíram")
@@ -820,8 +918,213 @@ class TransicaoEstadoControleAcessoRequestDTO(BaseModel):
     estado: EstadoVeiculo = Field(
         ..., description="Novo estado para o qual o veículo deve transitar (ex: ENTRADA, SAIDA)"
     )
+    motivo: Optional[str] = Field(None, description="Justificativa ou observação da transição")
+    usuario: Optional[str] = Field(None, description="Nome do operador informado pelo cliente")
+    bafometro_resultado: Optional[str] = Field(None, description="Resultado do teste de bafômetro (NEGATIVO/POSITIVO)")
+    bafometro_valor: Optional[Decimal] = Field(None, description="Medição em mg/L")
+    observacao: Optional[str] = Field(None, description="Observação opcional")
+
+
+class EntradaVeiculoRequestDTO(BaseModel):
+    """Payload específico para confirmação de entrada na portaria."""
+    bafometro_resultado: str = Field("NEGATIVO", description="Resultado do teste de alcoolemia")
+    bafometro_valor: Decimal = Field(Decimal("0.00"), ge=0, description="Valor aferido em mg/L")
     observacao: Optional[str] = Field(None, description="Observação opcional da portaria")
 
 
+class AvancarColetaRequestDTO(BaseModel):
+    """Payload para avanço da portaria para etapa de coleta/amostragem."""
+    observacao: Optional[str] = Field(None, description="Observação opcional de envio à amostragem")
+
+
+class SaidaVeiculoRequestDTO(BaseModel):
+    """Payload para liberação e registro de saída do veículo."""
+    observacao: Optional[str] = Field(None, description="Observações finais da liberação na portaria")
+
+
+class RetornarEstadoRequestDTO(BaseModel):
+    """Payload para reversão/rollback justificado do estado do veículo."""
+    motivo: str = Field(..., min_length=3, max_length=500, description="Justificativa técnica/operacional obrigatória")
+
+
+class CancelarAcessoRequestDTO(BaseModel):
+    """Payload para cancelamento do acesso do veículo na portaria."""
+    motivo: Optional[str] = Field(None, max_length=500, description="Motivo do cancelamento")
+
+
+class NovoVeiculoDescargaRequestDTO(BaseModel):
+    """Payload unificado para registro de novo veículo de descarga (compatível com frontend e API externa)."""
+    motorista: str = Field(..., min_length=2, max_length=150, description="Nome completo do motorista condutor")
+    placa: str = Field(..., description="Placa do veículo (padrão Mercosul ex: ABC1D23 ou tradicional ABC1234)")
+    numero_nf: str = Field(..., min_length=1, max_length=50, description="Número da nota fiscal de transporte")
+    congenere_id: int = Field(..., gt=0, description="ID da distribuidora congênere proprietária do produto")
+    transportadora: str = Field(..., min_length=2, max_length=150, description="Nome da empresa transportadora")
+    is_propria: bool = Field(
+        False,
+        validation_alias=AliasChoices("is_propria", "is_transportadora_propria", "transportadora_propria"),
+        description="Indica se o transporte é realizado por frota própria",
+    )
+    tipo_operacao: TipoOperacao = Field(
+        TipoOperacao.DESCARGA,
+        validation_alias=AliasChoices("tipo_operacao", "operacao"),
+        description="Tipo da operação (DESCARGA)",
+    )
+    observacao_geral: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("observacao_geral", "observacao"),
+        description="Observações operacionais da portaria",
+    )
+    compartimentos: Optional[List[CompartimentoDescargaInputDTO]] = Field(
+        None, description="Lista plana de compartimentos físicos com volumes faturados"
+    )
+    produtos_compartimentos: Optional[List[ProdutoCompartimentosDTO]] = Field(
+        None, description="Formato agrupado por combustível enviado pelo frontend"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonizar_compartimentos(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            prods_comps = data.get("produtos_compartimentos")
+            comps = data.get("compartimentos")
+            if prods_comps and not comps:
+                lista_achatada = []
+                idx = 1
+                for pc in prods_comps:
+                    prod = pc.get("produto")
+                    for c in pc.get("compartimentos", []):
+                        vol_raw = c.get("volume_nf") or 0
+                        try:
+                            vol_num = float(str(vol_raw).replace(",", "."))
+                        except (ValueError, TypeError):
+                            vol_num = 0.0
+
+                        cap_raw = c.get("capacidade_litros") or c.get("capacidade")
+                        if cap_raw is not None:
+                            try:
+                                cap_num = float(str(cap_raw).replace(",", "."))
+                            except (ValueError, TypeError):
+                                cap_num = max(vol_num, 10000.0)
+                        else:
+                            cap_num = max(vol_num, 10000.0)
+
+                        lista_achatada.append({
+                            "numero": idx,
+                            "produto": prod,
+                            "volume_nf": vol_raw,
+                            "capacidade_litros": cap_num,
+                        })
+                        idx += 1
+                data["compartimentos"] = lista_achatada
+        return data
+
+    @field_validator("placa")
+    @classmethod
+    def normalizar_e_validar_placa(cls, v: str) -> str:
+        placa_limpa = re.sub(r"[^A-Za-z0-9]", "", v).upper()
+        if not re.match(r"^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$", placa_limpa):
+            raise ValueError(
+                f"Placa inválida: '{v}'. Deve seguir o padrão brasileiro Mercosul (ex: ABC1D23) ou tradicional (ex: ABC1234)."
+            )
+        return placa_limpa
+
+    @field_validator("compartimentos")
+    @classmethod
+    def validar_compartimentos_unicos(
+        cls, v: Optional[List[CompartimentoDescargaInputDTO]]
+    ) -> Optional[List[CompartimentoDescargaInputDTO]]:
+        if not v:
+            raise ValueError("O veículo deve possuir ao menos 1 compartimento especificado.")
+        numeros = [c.numero for c in v]
+        if len(numeros) != len(set(numeros)):
+            raise ValueError(
+                f"Números de compartimento duplicados detectados: {numeros}. Cada compartimento deve ter um número único."
+            )
+        return v
+
+
+# Alias para retrocompatibilidade com endpoints legados
+RegistroDescargaRequestDTO = NovoVeiculoDescargaRequestDTO
+
+
+class AtualizarVeiculoDescargaRequestDTO(BaseModel):
+    """Payload para edição dos dados cadastrais do veículo enquanto na fila."""
+    motorista: Optional[str] = Field(None, min_length=2, max_length=150)
+    placa: Optional[str] = None
+    numero_nf: Optional[str] = Field(None, min_length=1, max_length=50)
+    congenere_id: Optional[int] = Field(None, gt=0)
+    transportadora: Optional[str] = Field(None, min_length=2, max_length=150)
+    is_propria: Optional[bool] = Field(
+        None,
+        validation_alias=AliasChoices("is_propria", "is_transportadora_propria", "transportadora_propria"),
+    )
+    tipo_operacao: Optional[TipoOperacao] = Field(
+        None,
+        validation_alias=AliasChoices("tipo_operacao", "operacao"),
+    )
+    observacao_geral: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("observacao_geral", "observacao"),
+    )
+    compartimentos: Optional[List[CompartimentoDescargaInputDTO]] = None
+    produtos_compartimentos: Optional[List[ProdutoCompartimentosDTO]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def harmonizar_compartimentos(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            prods_comps = data.get("produtos_compartimentos")
+            comps = data.get("compartimentos")
+            if prods_comps and not comps:
+                lista_achatada = []
+                idx = 1
+                for pc in prods_comps:
+                    prod = pc.get("produto")
+                    for c in pc.get("compartimentos", []):
+                        vol_raw = c.get("volume_nf") or 0
+                        try:
+                            vol_num = float(str(vol_raw).replace(",", "."))
+                        except (ValueError, TypeError):
+                            vol_num = 0.0
+
+                        cap_raw = c.get("capacidade_litros") or c.get("capacidade")
+                        if cap_raw is not None:
+                            try:
+                                cap_num = float(str(cap_raw).replace(",", "."))
+                            except (ValueError, TypeError):
+                                cap_num = max(vol_num, 10000.0)
+                        else:
+                            cap_num = max(vol_num, 10000.0)
+
+                        lista_achatada.append({
+                            "numero": idx,
+                            "produto": prod,
+                            "volume_nf": vol_raw,
+                            "capacidade_litros": cap_num,
+                        })
+                        idx += 1
+                data["compartimentos"] = lista_achatada
+        return data
+
+    @field_validator("placa")
+    @classmethod
+    def normalizar_placa(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return None
+        placa_limpa = re.sub(r"[^A-Za-z0-9]", "", v).upper()
+        if not re.match(r"^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$", placa_limpa):
+            raise ValueError(f"Placa inválida: '{v}'.")
+        return placa_limpa
+
+
+class RegistroDescargaResponseDTO(ControleAcessoItemDTO):
+    """Resposta com dados completos do registro de descarga na portaria."""
+    origem: Optional[str] = Field(None, description="Origem/base de procedência da carga")
+    observacao: Optional[str] = Field(None, description="Observações da portaria")
+    quantidade_compartimentos: Optional[int] = Field(None, description="Quantidade total de compartimentos")
+
+
 TerminalDetalheDTO.model_rebuild()
+RegistroDescargaResponseDTO.model_rebuild()
+
 
