@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
+    exige_permissao,
     get_db_session,
-    obter_usuario_autenticado,
     resolver_terminal_ativo,
 )
 from app.domain.models import Usuario
@@ -36,7 +36,7 @@ def _obter_terminal_id(request: Request, x_terminal_id: Optional[int]) -> int:
 )
 async def obter_terminal(
     request: Request,
-    _usuario: Usuario = Depends(obter_usuario_autenticado),
+    _usuario: Usuario = Depends(exige_permissao("sirac:config:terminal:dados_cadastrais")),
     session: AsyncSession = Depends(get_db_session),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
 ) -> TerminalDetalheDTO:
@@ -54,7 +54,7 @@ async def obter_terminal(
 async def atualizar_terminal_geral(
     request: Request,
     payload: TerminalGeralUpdateDTO,
-    _usuario: Usuario = Depends(obter_usuario_autenticado),
+    _usuario: Usuario = Depends(exige_permissao("sirac:config:terminal:dados_editar")),
     session: AsyncSession = Depends(get_db_session),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
 ) -> TerminalDetalheDTO:

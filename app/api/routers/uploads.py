@@ -8,10 +8,27 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.api.deps import obter_usuario_autenticado
+from app.domain.models import Usuario
+
 router = APIRouter(prefix="/uploads", tags=["Uploads & Storage"])
+
+# Limite máximo do arquivo (bytes).
+TAMANHO_MAXIMO_BYTES = 5 * 1024 * 1024
+
+
+def _detectar_mime(conteudo: bytes) -> str | None:
+    """Detecta o tipo de imagem pelos bytes iniciais (magic bytes)."""
+    if conteudo.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if conteudo.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if conteudo[:4] == b"RIFF" and conteudo[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 # Diretório base de armazenamento
 BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent  # backend/
@@ -33,9 +50,10 @@ async def upload_imagem(
         ..., description="Tipo da imagem: 'perfil' ou 'congenere'"
     ),
     arquivo: UploadFile = File(..., description="Arquivo de imagem a ser enviado"),
+    _usuario: Usuario = Depends(obter_usuario_autenticado),
 ):
     """
-    Realiza o upload de imagem para o storage dedicado.
+    Realiza o upload de imagem para o storage dedicado (requer autenticação).
     - Para 'congenere' e 'perfil': aceita PNG, JPG, JPEG ou WEBP.
     """
     nome_original = arquivo.filename or "imagem"
@@ -47,33 +65,45 @@ async def upload_imagem(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Formato de imagem inválido. Formatos aceitos: PNG, JPG, JPEG ou WEBP.",
         )
+    if content_type not in MIMES_PERFIL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Content-Type inválido. Formatos aceitos: image/png, image/jpeg ou image/webp.",
+        )
 
-    if tipo == "congenere":
-        target_dir = STORAGE_CONGENERE
-    else:
-        target_dir = STORAGE_PERFIL
+    target_dir = STORAGE_CONGENERE if tipo == "congenere" else STORAGE_PERFIL
 
-    # Nome único seguro
-    novo_nome = f"{uuid.uuid4().hex}{extensao}"
-    destino = target_dir / novo_nome
-
-    try:
-        conteudo = await arquivo.read()
-        # Limite máximo de 5MB
-        if len(conteudo) > 5 * 1024 * 1024:
+    # Leitura com guarda de tamanho por streaming (evita esgotar a RAM).
+    conteudo = bytearray()
+    while True:
+        pedaco = await arquivo.read(64 * 1024)
+        if not pedaco:
+            break
+        conteudo.extend(pedaco)
+        if len(conteudo) > TAMANHO_MAXIMO_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="O arquivo excede o tamanho máximo permitido de 5MB.",
             )
 
+    # Valida o conteúdo real por magic bytes (impede arquivos disfarçados de imagem).
+    mime_real = _detectar_mime(bytes(conteudo[:16]))
+    if mime_real is None or mime_real not in MIMES_PERFIL:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="O conteúdo enviado não corresponde a uma imagem PNG, JPEG ou WEBP válida.",
+        )
+
+    novo_nome = f"{uuid.uuid4().hex}{extensao}"
+    destino = target_dir / novo_nome
+    try:
         with open(destino, "wb") as f:
             f.write(conteudo)
-    except HTTPException:
-        raise
-    except Exception as e:
+    except OSError:
+        # Não vaza detalhes internos do sistema de arquivos ao cliente.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao salvar arquivo no storage: {str(e)}",
+            detail="Não foi possível salvar o arquivo no storage.",
         )
 
     url_publica = f"/api/v1/uploads/{tipo}/{novo_nome}"
@@ -81,7 +111,7 @@ async def upload_imagem(
         "url": url_publica,
         "filename": novo_nome,
         "tipo": tipo,
-        "content_type": content_type or f"image/{extensao.replace('.', '')}",
+        "content_type": mime_real,
     }
 
 

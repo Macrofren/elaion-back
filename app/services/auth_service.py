@@ -6,11 +6,13 @@ tokens e ativação de contas de colaboradores. Sem dependência de bibliotecas 
 """
 
 import re
+from datetime import datetime, timezone
 from typing import Tuple
 
 import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -18,6 +20,7 @@ from app.core.security import (
     hash_password,
     hash_pin,
     verify_password,
+    verify_pin,
 )
 from app.domain.exceptions import (
     AcessoNegadoException,
@@ -28,6 +31,7 @@ from app.domain.models import Usuario
 from app.domain.schemas import (
     AtualizarPerfilRequest,
     PrimeiroAcessoConcluirRequest,
+    RedefinirSenhaColaboradorRequest,
     TerminalPermissaoDetalheDTO,
     TerminalVinculoDTO,
     UserProfileResponse,
@@ -253,16 +257,20 @@ async def atualizar_perfil(
 
     if quer_alterar_senha:
         nova_senha = payload.nova_senha.strip()
-        if len(nova_senha) < 6:
-            raise RegraNegocioException("A nova senha deve ter no mínimo 6 caracteres.")
+        if len(nova_senha) < settings.SENHA_MIN_LENGTH:
+            raise RegraNegocioException(
+                f"A nova senha deve ter no mínimo {settings.SENHA_MIN_LENGTH} caracteres."
+            )
         if nova_senha != (payload.confirmacao_senha or "").strip():
             raise RegraNegocioException("As senhas informadas não conferem.")
         usuario.senha_hash = hash_password(nova_senha)
 
     if quer_alterar_pin:
         pin_limpo = _apenas_digitos(payload.novo_pin)
-        if len(pin_limpo) != 4:
-            raise RegraNegocioException("O PIN de segurança deve conter exatamente 4 dígitos numéricos.")
+        if len(pin_limpo) != settings.PIN_LENGTH:
+            raise RegraNegocioException(
+                f"O PIN de segurança deve conter exatamente {settings.PIN_LENGTH} dígitos numéricos."
+            )
         if pin_limpo != _apenas_digitos(payload.confirmacao_pin or ""):
             raise RegraNegocioException("Os PINs informados não conferem.")
         usuario.pin_seguranca_hash = hash_pin(pin_limpo)
@@ -306,5 +314,57 @@ async def primeiro_acesso_concluir(
     usuario.status_conta = STATUS_ATIVO
     usuario.ativo = True
     usuario.codigo_ativacao = None
+    await usuario_repository.salvar(session, usuario)
+    await session.commit()
+
+
+async def redefinir_senha_colaborador(
+    session: AsyncSession, payload: RedefinirSenhaColaboradorRequest
+) -> None:
+    """
+    Fase 2 do Handshake Zero-Trust: valida o Código de Liberação (LIB-XXXX) emitido
+    pelo gestor + o PIN pessoal do colaborador e efetiva a nova senha.
+
+    Mensagens de erro são genéricas de propósito, para não revelar qual fator falhou.
+    """
+    cpf_normalizado = _apenas_digitos(payload.cpf)
+    usuario = await usuario_repository.get_by_cpf(session, cpf_normalizado)
+
+    codigo_informado = (payload.codigo_liberacao or "").strip().upper()
+    credenciais_invalidas = NaoAutorizadoException(
+        "Código de liberação ou PIN inválidos. Verifique os dados com o gestor."
+    )
+
+    if usuario is None or not usuario.codigo_liberacao_master:
+        raise credenciais_invalidas
+    if usuario.status_conta != STATUS_ATIVO or not usuario.ativo:
+        raise credenciais_invalidas
+    if usuario.codigo_liberacao_master.strip().upper() != codigo_informado:
+        raise credenciais_invalidas
+
+    # Validação de expiração do código de liberação.
+    expira_em = usuario.liberacao_expira_em
+    if expira_em is None:
+        raise credenciais_invalidas
+    if expira_em.tzinfo is None:
+        expira_em = expira_em.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expira_em:
+        raise NaoAutorizadoException("Código de liberação expirado. Solicite um novo ao gestor.")
+
+    # Segundo fator: PIN pessoal do colaborador.
+    if not usuario.pin_seguranca_hash or not verify_pin(payload.pin_seguranca, usuario.pin_seguranca_hash):
+        raise credenciais_invalidas
+
+    if payload.nova_senha != payload.confirmacao_senha:
+        raise RegraNegocioException("A nova senha e a confirmação de senha não coincidem.")
+    if len(payload.nova_senha) < settings.SENHA_MIN_LENGTH:
+        raise RegraNegocioException(
+            f"A nova senha deve ter no mínimo {settings.SENHA_MIN_LENGTH} caracteres."
+        )
+
+    usuario.senha_hash = hash_password(payload.nova_senha)
+    # Consome o código de liberação (uso único).
+    usuario.codigo_liberacao_master = None
+    usuario.liberacao_expira_em = None
     await usuario_repository.salvar(session, usuario)
     await session.commit()

@@ -35,13 +35,19 @@ class BaseRepository(Generic[ModelType]):
         return db_obj
 
     async def update(self, session: AsyncSession, db_obj: ModelType, obj_in: Any) -> ModelType:
-        """Atualiza um registro existente com os dados fornecidos."""
+        """
+        Atualiza um registro existente com os dados fornecidos.
+
+        Apenas os campos efetivamente presentes no payload são aplicados
+        (DTOs Pydantic usam `exclude_unset=True`); um campo presente com valor
+        `None` limpa a coluna correspondente (permite anular campos opcionais).
+        """
         if isinstance(obj_in, dict):
             update_data = obj_in
         else:
             update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
-            if hasattr(db_obj, field) and value is not None:
+            if hasattr(db_obj, field):
                 setattr(db_obj, field, value)
         session.add(db_obj)
         await session.commit()

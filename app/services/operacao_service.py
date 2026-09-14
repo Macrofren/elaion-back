@@ -182,12 +182,23 @@ class OperacaoService:
         dtos = [_montar_dto_item(item) for item in itens]
         total_pages = max(1, (total + page_size - 1) // page_size) if total > 0 else 1
 
+        counts = await operacao_repository.obter_contadores(
+            session=session,
+            terminal_id=terminal_id,
+            data_inicio=d_inicio,
+            data_fim=d_fim,
+            operacoes=operacoes,
+            busca=busca,
+            produtos=produtos,
+        )
+
         return PaginatedControleAcessoResponseDTO(
             items=dtos,
             total=total,
             page=page,
             page_size=page_size,
             total_pages=total_pages,
+            contagens=ControleAcessoContagensResponseDTO(**counts),
         )
 
     async def obter_contagens(
@@ -197,6 +208,9 @@ class OperacaoService:
         data_inicio: Optional[str] = None,
         data_fim: Optional[str] = None,
         tipo_operacao_str: Optional[str] = None,
+        operacoes: Optional[List[str]] = None,
+        busca: Optional[str] = None,
+        produtos: Optional[List[str]] = None,
     ) -> ControleAcessoContagensResponseDTO:
         """Obtém as contagens consolidadas para as abas (FILA, ENTRADA, COLETA, SAIDA, CANCELADO, TOTAL)."""
         d_inicio: Optional[date] = None
@@ -226,6 +240,9 @@ class OperacaoService:
             data_inicio=d_inicio,
             data_fim=d_fim,
             tipo_operacao=tipo_op,
+            operacoes=operacoes,
+            busca=busca,
+            produtos=produtos,
         )
 
         return ControleAcessoContagensResponseDTO(**counts)

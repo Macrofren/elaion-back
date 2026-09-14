@@ -189,12 +189,42 @@ async def obter_contagens_controle_acesso(
         None,
         description="Filtrar por tipo de operação (DESCARGA ou CARREGAMENTO)",
     ),
+    operacoes: Optional[List[str]] = Query(
+        None,
+        description="Filtrar por lista de operações",
+    ),
+    busca: Optional[str] = Query(
+        None,
+        description="Busca textual por motorista, placa, NF, transportadora ou congênere",
+    ),
+    produtos: Optional[List[str]] = Query(
+        None,
+        description="Filtrar por produtos transportados",
+    ),
+    produto: Optional[str] = Query(
+        None,
+        description="Filtro por produto único ou separado por vírgula",
+    ),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
     _usuario: Usuario = Depends(exige_qualquer_permissao(PERMISSOES_VISUALIZAR)),
     session: AsyncSession = Depends(get_db_session),
 ) -> ControleAcessoContagensResponseDTO:
     """Contagens dos seletores de abas consultadas diretamente do banco de dados."""
     terminal_id = _obter_terminal_id(request, x_terminal_id)
+
+    operacoes_consolidadas: List[str] = []
+    if operacoes:
+        for op in operacoes:
+            operacoes_consolidadas.extend([x.strip() for x in op.split(",") if x.strip()])
+    if operacao:
+        operacoes_consolidadas.extend([x.strip() for x in operacao.split(",") if x.strip()])
+
+    produtos_consolidados: List[str] = []
+    if produtos:
+        for p in produtos:
+            produtos_consolidados.extend([x.strip() for x in p.split(",") if x.strip()])
+    if produto:
+        produtos_consolidados.extend([x.strip() for x in produto.split(",") if x.strip()])
 
     d_inicio = data_inicio
     d_fim = data_fim
@@ -208,6 +238,9 @@ async def obter_contagens_controle_acesso(
         data_inicio=d_inicio,
         data_fim=d_fim,
         tipo_operacao_str=operacao,
+        operacoes=operacoes_consolidadas or None,
+        busca=busca,
+        produtos=produtos_consolidados or None,
     )
 
 

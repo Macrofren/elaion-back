@@ -229,9 +229,9 @@ class PrimeiroAcessoValidarResponse(BaseModel):
 class PrimeiroAcessoConcluirRequest(BaseModel):
     cpf: str = Field(..., min_length=11, max_length=11)
     codigo_ativacao: str = Field(..., min_length=4, max_length=20)
-    nova_senha: str = Field(..., min_length=8, description="Senha forte pessoal")
+    nova_senha: str = Field(..., min_length=8, description="Senha forte pessoal (mínimo 8 caracteres)")
     confirmacao_senha: str = Field(..., min_length=8)
-    pin_seguranca: str = Field(..., min_length=4, max_length=6, pattern=r"^\d+$", description="PIN secreto de 4 a 6 dígitos")
+    pin_seguranca: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$", description="PIN secreto de 4 dígitos")
 
 
 class MensagemSucessoResponse(BaseModel):
@@ -254,7 +254,7 @@ class AutorizarRedefinicaoResponse(BaseModel):
 class RedefinirSenhaColaboradorRequest(BaseModel):
     cpf: str = Field(..., min_length=11, max_length=11)
     codigo_liberacao: str = Field(..., min_length=4, max_length=20, description="Código LIB-XXXX fornecido pelo gestor")
-    pin_seguranca: str = Field(..., min_length=4, max_length=6, pattern=r"^\d+$", description="PIN pessoal secreto cadastrado no 1º acesso")
+    pin_seguranca: str = Field(..., min_length=4, max_length=4, pattern=r"^\d{4}$", description="PIN pessoal secreto de 4 dígitos cadastrado no 1º acesso")
     nova_senha: str = Field(..., min_length=8)
     confirmacao_senha: str = Field(..., min_length=8)
 
@@ -891,17 +891,6 @@ class ControleAcessoItemDTO(BaseModel):
 ControleAcessoResponseDTO = ControleAcessoItemDTO
 
 
-class PaginatedControleAcessoResponseDTO(BaseModel):
-    """Envelope paginado de registros do controle de acesso."""
-    items: List[ControleAcessoItemDTO] = Field(
-        default_factory=list, description="Lista paginada de registros"
-    )
-    total: int = Field(..., description="Total geral de registros que atendem aos filtros")
-    page: int = Field(..., ge=1, description="Página atual")
-    page_size: int = Field(..., ge=1, description="Tamanho da página")
-    total_pages: int = Field(..., ge=0, description="Total de páginas disponíveis")
-
-
 class ControleAcessoContagensResponseDTO(BaseModel):
     """Contadores para os seletores de abas e resumo operacional do dia."""
     FILA: int = Field(0, description="Veículos aguardando na fila da portaria")
@@ -911,6 +900,20 @@ class ControleAcessoContagensResponseDTO(BaseModel):
     SAIDA: int = Field(0, description="Veículos que concluíram a operação e saíram")
     CANCELADO: int = Field(0, description="Operações canceladas/rejeitadas")
     total: int = Field(0, description="Total geral de veículos registrados no dia")
+
+
+class PaginatedControleAcessoResponseDTO(BaseModel):
+    """Envelope paginado de registros do controle de acesso."""
+    items: List[ControleAcessoItemDTO] = Field(
+        default_factory=list, description="Lista paginada de registros"
+    )
+    total: int = Field(..., description="Total geral de registros que atendem aos filtros")
+    page: int = Field(..., ge=1, description="Página atual")
+    page_size: int = Field(..., ge=1, description="Tamanho da página")
+    total_pages: int = Field(..., ge=0, description="Total de páginas disponíveis")
+    contagens: Optional[ControleAcessoContagensResponseDTO] = Field(
+        None, description="Contadores consolidados por aba considerando os filtros aplicados"
+    )
 
 
 class TransicaoEstadoControleAcessoRequestDTO(BaseModel):

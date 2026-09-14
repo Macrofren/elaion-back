@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,6 +26,84 @@ from app.domain.models import (
     Usuario,
 )
 from app.infra.repositories.base import BaseRepository
+
+
+# =============================================================================
+# ESTADO OFICIAL DO VEÍCULO — derivado SEMPRE do historico_status (fonte da verdade)
+# =============================================================================
+
+# Fallback aplicado apenas a registros legados sem nenhum evento de histórico.
+_STATUS_PARA_MACRO = {
+    StatusOperacao.AGUARDANDO_PORTARIA: "FILA",
+    StatusOperacao.EM_OPERACAO: "ENTRADA",
+    StatusOperacao.APROVADO_OPERACAO: "ENTRADA",
+    StatusOperacao.EM_AMOSTRAGEM: "COLETA",
+    StatusOperacao.EM_ANALISE_LAB: "COLETA",
+    StatusOperacao.CONCLUIDO: "SAIDA",
+    StatusOperacao.CANCELADO: "CANCELADO",
+    StatusOperacao.REPROVADO: "CANCELADO",
+}
+
+# Estados macro reconhecidos para filtros de listagem.
+_MACRO_ESTADOS = {"FILA", "ENTRADA", "COLETA", "SAIDA", "CANCELADO"}
+
+
+def _subquery_ultimo_estado():
+    """Subquery com o último evento de historico_status de cada operação (1 linha por operação)."""
+    rn = func.row_number().over(
+        partition_by=OperacaoStatusHistorico.operacao_id,
+        order_by=(
+            OperacaoStatusHistorico.data_hora.desc(),
+            OperacaoStatusHistorico.id.desc(),
+        ),
+    ).label("rn")
+    inner = select(
+        OperacaoStatusHistorico.operacao_id.label("operacao_id"),
+        func.upper(OperacaoStatusHistorico.status_novo).label("estado_raw"),
+        rn,
+    ).subquery()
+    return (
+        select(
+            inner.c.operacao_id.label("operacao_id"),
+            inner.c.estado_raw.label("estado_raw"),
+        )
+        .where(inner.c.rn == 1)
+        .subquery()
+    )
+
+
+def _estado_final_expr(sq):
+    """
+    Expressão SQL do macro-estado OFICIAL do veículo.
+
+    Prioriza SEMPRE o último `historico_status`; apenas para registros legados
+    sem histórico algum recorre ao mapeamento de `status_operacao`.
+    """
+    estado_status_fallback = case(
+        *[(OperacaoVeiculo.status_operacao == st, macro) for st, macro in _STATUS_PARA_MACRO.items()],
+        else_="FILA",
+    )
+    return case(
+        (sq.c.estado_raw.is_(None), estado_status_fallback),
+        (sq.c.estado_raw.in_(["FILA", "AGUARDANDO", "AGUARDANDO_PORTARIA"]), "FILA"),
+        (sq.c.estado_raw == "ENTRADA", "ENTRADA"),
+        (sq.c.estado_raw == "COLETA", "COLETA"),
+        (sq.c.estado_raw == "SAIDA", "SAIDA"),
+        (sq.c.estado_raw == "CANCELADO", "CANCELADO"),
+        else_="FILA",
+    )
+
+
+def _normalizar_macro_estados(estados: List[str]) -> List[str]:
+    """Converte rótulos de filtro informados pelo cliente para os macro-estados oficiais."""
+    solicitados: Set[str] = set()
+    for e in estados:
+        eu = str(e).strip().upper()
+        if eu in ("FILA", "AGUARDANDO", "AGUARDANDO_PORTARIA"):
+            solicitados.add("FILA")
+        elif eu in _MACRO_ESTADOS:
+            solicitados.add(eu)
+    return list(solicitados)
 
 
 async def obter_ou_criar_produto_por_combustivel(
@@ -126,28 +204,20 @@ class OperacaoRepository(BaseRepository[OperacaoVeiculo]):
             if ops_normalizadas:
                 filtros.append(OperacaoVeiculo.tipo_operacao.in_(ops_normalizadas))
 
-        if estados:
-            status_set: Set[StatusOperacao] = set()
-            for e in estados:
-                e_upper = str(e).strip().upper()
-                if e_upper in ("FILA", "AGUARDANDO"):
-                    status_set.add(StatusOperacao.AGUARDANDO_PORTARIA)
-                elif e_upper == "ENTRADA":
-                    status_set.add(StatusOperacao.EM_OPERACAO)
-                    status_set.add(StatusOperacao.APROVADO_OPERACAO)
-                elif e_upper == "COLETA":
-                    status_set.add(StatusOperacao.EM_AMOSTRAGEM)
-                    status_set.add(StatusOperacao.EM_ANALISE_LAB)
-                elif e_upper == "SAIDA":
-                    status_set.add(StatusOperacao.CONCLUIDO)
-                elif e_upper == "CANCELADO":
-                    status_set.add(StatusOperacao.CANCELADO)
-                    status_set.add(StatusOperacao.REPROVADO)
-            if status_set:
-                filtros.append(OperacaoVeiculo.status_operacao.in_(list(status_set)))
+        # Estado oficial derivado do historico_status (fonte da verdade).
+        sq_estado = _subquery_ultimo_estado()
+        estado_expr = _estado_final_expr(sq_estado)
 
-        # Subquery para busca textual em múltiplos campos incluindo congênere
-        base_query = select(OperacaoVeiculo).where(*filtros)
+        base_query = (
+            select(OperacaoVeiculo)
+            .outerjoin(sq_estado, sq_estado.c.operacao_id == OperacaoVeiculo.id)
+            .where(*filtros)
+        )
+
+        if estados:
+            macro_solicitados = _normalizar_macro_estados(estados)
+            if macro_solicitados:
+                base_query = base_query.where(estado_expr.in_(macro_solicitados))
 
         if busca and busca.strip():
             termo = f"%{busca.strip().lower()}%"
@@ -216,6 +286,9 @@ class OperacaoRepository(BaseRepository[OperacaoVeiculo]):
         data_inicio: Optional[date] = None,
         data_fim: Optional[date] = None,
         tipo_operacao: Optional[TipoOperacao] = None,
+        operacoes: Optional[List[str]] = None,
+        busca: Optional[str] = None,
+        produtos: Optional[List[str]] = None,
     ) -> Dict[str, int]:
         """Calcula a contagem de veículos agrupada por status/estado para os badges das abas."""
         filtros = [OperacaoVeiculo.terminal_id == terminal_id]
@@ -226,26 +299,69 @@ class OperacaoRepository(BaseRepository[OperacaoVeiculo]):
             filtros.append(func.date(OperacaoVeiculo.data_hora_entrada) <= data_fim)
         if tipo_operacao:
             filtros.append(OperacaoVeiculo.tipo_operacao == tipo_operacao)
+        elif operacoes:
+            ops_normalizadas: List[TipoOperacao] = []
+            for op in operacoes:
+                op_str = str(op).strip().upper()
+                if op_str in ("DESCARGA", "DESCARREGAR"):
+                    ops_normalizadas.append(TipoOperacao.DESCARGA)
+                elif op_str in ("CARREGAMENTO", "CARREGAR"):
+                    ops_normalizadas.append(TipoOperacao.CARREGAMENTO)
+            if ops_normalizadas:
+                filtros.append(OperacaoVeiculo.tipo_operacao.in_(ops_normalizadas))
+
+        # Contagem por macro-estado OFICIAL (derivado do historico_status).
+        sq_estado = _subquery_ultimo_estado()
+        estado_expr = _estado_final_expr(sq_estado)
 
         stmt = (
-            select(OperacaoVeiculo.status_operacao, func.count(OperacaoVeiculo.id))
+            select(estado_expr.label("estado"), func.count(OperacaoVeiculo.id))
+            .select_from(OperacaoVeiculo)
+            .outerjoin(sq_estado, sq_estado.c.operacao_id == OperacaoVeiculo.id)
             .where(*filtros)
-            .group_by(OperacaoVeiculo.status_operacao)
         )
+
+        if busca and busca.strip():
+            termo = f"%{busca.strip().lower()}%"
+            stmt = stmt.outerjoin(OperacaoVeiculo.congenere).where(
+                or_(
+                    func.lower(OperacaoVeiculo.nome_motorista).like(termo),
+                    func.lower(OperacaoVeiculo.placa_veiculo).like(termo),
+                    func.lower(OperacaoVeiculo.numero_nota_fiscal).like(termo),
+                    func.lower(OperacaoVeiculo.nome_transportadora).like(termo),
+                    func.lower(Congenere.razao_social).like(termo),
+                )
+            )
+
+        if produtos:
+            prods_upper = [p.strip().upper() for p in produtos if p.strip()]
+            if prods_upper:
+                codigos_anp_alvo = [
+                    CODIGOS_ANP_COMBUSTIVEIS[k]
+                    for k in TipoCombustivel
+                    if k.value in prods_upper and k in CODIGOS_ANP_COMBUSTIVEIS
+                ]
+                sub_comp = (
+                    select(OperacaoCompartimento.operacao_id)
+                    .join(OperacaoCompartimento.produto)
+                    .where(
+                        or_(
+                            Produto.codigo_anp.in_(codigos_anp_alvo),
+                            func.upper(Produto.nome).in_(prods_upper),
+                        )
+                    )
+                )
+                stmt = stmt.where(OperacaoVeiculo.id.in_(sub_comp))
+
+        stmt = stmt.group_by(estado_expr)
         res = await session.execute(stmt)
         counts = {r[0]: r[1] for r in res.all()}
 
-        fila = counts.get(StatusOperacao.AGUARDANDO_PORTARIA, 0)
-        entrada = counts.get(StatusOperacao.EM_OPERACAO, 0) + counts.get(
-            StatusOperacao.APROVADO_OPERACAO, 0
-        )
-        coleta = counts.get(StatusOperacao.EM_AMOSTRAGEM, 0) + counts.get(
-            StatusOperacao.EM_ANALISE_LAB, 0
-        )
-        saida = counts.get(StatusOperacao.CONCLUIDO, 0)
-        cancelado = counts.get(StatusOperacao.CANCELADO, 0) + counts.get(
-            StatusOperacao.REPROVADO, 0
-        )
+        fila = counts.get("FILA", 0)
+        entrada = counts.get("ENTRADA", 0)
+        coleta = counts.get("COLETA", 0)
+        saida = counts.get("SAIDA", 0)
+        cancelado = counts.get("CANCELADO", 0)
         total = sum(counts.values())
 
         return {

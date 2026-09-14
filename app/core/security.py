@@ -34,21 +34,26 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "access"})
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
 
 def decode_access_token(token: str) -> dict:
     """
-    Decodifica e valida a assinatura e expiração de um token JWT.
+    Decodifica e valida a assinatura e expiração de um token JWT de acesso.
     Lança jwt.ExpiredSignatureError se expirado ou jwt.PyJWTError se inválido.
+    Rejeita explicitamente tokens que não sejam do tipo 'access' (ex.: refresh
+    tokens), evitando confusão de tokens (token confusion).
     """
-    return jwt.decode(
+    payload = jwt.decode(
         token,
         settings.JWT_SECRET_KEY,
         algorithms=[settings.JWT_ALGORITHM],
     )
+    if payload.get("type") != "access":
+        raise jwt.InvalidTokenError("Token não é um access token válido.")
+    return payload
 
 
 # =============================================================================
