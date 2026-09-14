@@ -973,6 +973,7 @@ class NovoVeiculoDescargaRequestDTO(BaseModel):
         None,
         validation_alias=AliasChoices("observacao_geral", "observacao"),
         description="Observações operacionais da portaria",
+        max_length=1000,
     )
     compartimentos: Optional[List[CompartimentoDescargaInputDTO]] = Field(
         None, description="Lista plana de compartimentos físicos com volumes faturados"
@@ -1041,7 +1042,6 @@ class NovoVeiculoDescargaRequestDTO(BaseModel):
                 f"Números de compartimento duplicados detectados: {numeros}. Cada compartimento deve ter um número único."
             )
         return v
-
 
 # Alias para retrocompatibilidade com endpoints legados
 RegistroDescargaRequestDTO = NovoVeiculoDescargaRequestDTO

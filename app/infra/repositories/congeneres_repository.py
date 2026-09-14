@@ -38,10 +38,14 @@ class CongenereRepository:
         busca: Optional[str] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
+        ativo: Optional[bool] = None,
     ) -> tuple[List[Congenere], int]:
         from sqlalchemy import func
 
         stmt = select(Congenere).where(Congenere.terminal_id == terminal_id)
+
+        if ativo is not None:
+            stmt = stmt.where(Congenere.ativo == ativo)
 
         if busca:
             clean_digits = "".join(filter(str.isdigit, busca))

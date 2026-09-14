@@ -125,9 +125,10 @@ class CongeneresService:
         busca: Optional[str] = None,
         page: int = 1,
         page_size: int = 10,
+        ativo: Optional[bool] = None,
     ) -> PaginatedCongeneresResponseDTO:
         items, total_count = await congenere_repository.listar_por_terminal(
-            session, terminal_id, busca, page=page, page_size=page_size
+            session, terminal_id, busca, page=page, page_size=page_size, ativo=ativo
         )
         total_pages = max(1, (total_count + page_size - 1) // page_size)
 

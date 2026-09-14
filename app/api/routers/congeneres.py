@@ -64,13 +64,14 @@ async def listar_congeneres(
     busca: Optional[str] = Query(None, description="Filtro textual livre por razão social, cnpj, email etc."),
     page: int = Query(1, ge=1, description="Número da página"),
     page_size: int = Query(10, ge=1, le=100, description="Quantidade de itens por página"),
+    ativo: Optional[bool] = Query(None, description="Filtro por status (True para ativo, False para inativo)"),
     _usuario: Usuario = Depends(exige_permissao("sirac:config:congenere:visualizar")),
     session: AsyncSession = Depends(get_db_session),
     x_terminal_id: Optional[int] = Header(None, alias="X-Terminal-ID"),
 ) -> PaginatedCongeneresResponseDTO:
     terminal_id = _obter_terminal_id(request, x_terminal_id)
     return await congeneres_service.listar_congeneres(
-        session, terminal_id, busca=busca, page=page, page_size=page_size
+        session, terminal_id, busca=busca, page=page, page_size=page_size, ativo=ativo
     )
 
 
