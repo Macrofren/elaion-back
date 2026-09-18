@@ -73,6 +73,7 @@ class TipoCombustivel(str, PyEnum):
     DIESEL_S500_A = "DIESEL_S500_A"
     ETANOL_ANIDRO = "ETANOL_ANIDRO"
     ETANOL_HIDRATADO = "ETANOL_HIDRATADO"
+    BIODIESEL_B100 = "BIODIESEL_B100"
 
 
 NOMES_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
@@ -81,6 +82,7 @@ NOMES_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
     TipoCombustivel.DIESEL_S500_A: "Diesel S500 A",
     TipoCombustivel.ETANOL_ANIDRO: "Etanol Anidro",
     TipoCombustivel.ETANOL_HIDRATADO: "Etanol Hidratado",
+    TipoCombustivel.BIODIESEL_B100: "Biodiesel B100",
 }
 
 CODIGOS_ANP_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
@@ -89,6 +91,7 @@ CODIGOS_ANP_COMBUSTIVEIS: dict[TipoCombustivel, str] = {
     TipoCombustivel.DIESEL_S500_A: "420102004",
     TipoCombustivel.ETANOL_ANIDRO: "610101001",
     TipoCombustivel.ETANOL_HIDRATADO: "610101002",
+    TipoCombustivel.BIODIESEL_B100: "820101001",
 }
 
 

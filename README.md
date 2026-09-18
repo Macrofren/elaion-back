@@ -186,3 +186,18 @@ Para rodar com exibição detalhada:
 ```bash
 pytest -v -s
 ```
+
+---
+
+## 🐳 Execução via Docker e Docker Compose
+
+O projeto conta com imagens Docker isoladas para o Backend e PostgreSQL 16, além de suporte a inicialização unificada ou deploys distribuídos em servidores separados.
+
+Para subir a stack completa (Backend + Banco de Dados + Migrações + Seeds automáticos):
+```bash
+# Na raiz do projeto:
+docker compose up -d --build
+```
+
+Para instruções detalhadas de configuração em servidores distintos, consulte o [Guia Docker (DOCKER.md)](../DOCKER.md).
+

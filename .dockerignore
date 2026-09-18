@@ -1,0 +1,29 @@
+.git
+.gitignore
+.venv
+venv
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Variáveis de ambiente locais (nunca devem ir para a imagem de produção)
+.env
+.env.local
+.env.*.local
+
+# Arquivos de upload em tempo de desenvolvimento
+storage/uploads/fotos_perfil/*
+storage/uploads/logos_congeneres/*
+
+# Arquivos temporários e diagramas
+makeMer.py
+MER_ELAION_SIRAC.*

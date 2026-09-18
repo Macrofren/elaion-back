@@ -14,6 +14,7 @@ from app.domain.models import (
     CategoriaProduto,
     EstadoVeiculo,
     NOMES_COMBUSTIVEIS,
+    OrigemMP,
     PapelUsuario,
     ParecerLaudo,
     StatusAmostra,
@@ -1130,4 +1131,146 @@ class RegistroDescargaResponseDTO(ControleAcessoItemDTO):
 TerminalDetalheDTO.model_rebuild()
 RegistroDescargaResponseDTO.model_rebuild()
 
+
+# =============================================================================
+# 11. SCHEMAS: TRIAGEM / AMOSTRAS (COLETA E LABORATÓRIO)
+# =============================================================================
+
+class AmostraItemRequestDTO(BaseModel):
+    """Item individual de amostra preenchido no drawer para um ou mais compartimentos."""
+
+    compartimento_ids: List[int] = Field(
+        ...,
+        validation_alias=AliasChoices("compartimento_ids", "compartimento_id", "compartimentos"),
+        description="Lista de IDs dos compartimentos vinculados a esta coleta de amostra",
+    )
+    produto_id: Optional[int] = Field(
+        None,
+        description="ID do produto combustível (opcional se fornecido nome ou valor)",
+    )
+    produto: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("produto", "produto_amostra", "produto_valor"),
+        description="Identificador, valor ou nome do produto combustível",
+    )
+    codigo_amostra: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Código da amostra físico/etiqueta (se omitido, o backend gera automaticamente)",
+    )
+    temperatura_coleta_celsius: Decimal = Field(
+        ...,
+        ge=-50,
+        le=100,
+        description="Temperatura apurada no momento da coleta em graus Celsius",
+    )
+    tipo_coleta: TipoColeta = Field(
+        default=TipoColeta.CORRIDO,
+        description="Técnica de coleta da amostra (CORRIDO, TOPO, MEIO, FUNDO)",
+    )
+    is_recoleta: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("is_recoleta", "is_recoletada"),
+        description="Flag indicando se a amostra é proveniente de recoleta",
+    )
+    motivo_recoleta: Optional[str] = Field(
+        None,
+        description="Justificativa técnica em caso de recoleta",
+    )
+    amostra_origem_recoleta_id: Optional[int] = Field(
+        None,
+        description="ID da amostra reprovada de origem em caso de recoleta",
+    )
+    tanque_descarga_pretendido_id: Optional[int] = Field(
+        None,
+        description="ID do tanque de destino pretendido para descarga (se já pré-alocado)",
+    )
+    origem_mp: Optional[OrigemMP] = Field(
+        default=OrigemMP.VEGETAL,
+        validation_alias=AliasChoices("origem_mp", "origemMp"),
+        description="Origem da matéria-prima (VEGETAL ou ANIMAL)",
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+
+class RegistrarAmostrasRequestDTO(BaseModel):
+    """Payload de entrada para o endpoint de registro de novas amostras (Drawer Nova Amostra)."""
+
+    operacao_id: int = Field(
+        ...,
+        validation_alias=AliasChoices("operacao_id", "veiculo_id"),
+        description="ID da operação do veículo no pátio",
+    )
+    origem_destino: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Origem/procedência ou destino do veículo informado no drawer",
+    )
+    amostras: List[AmostraItemRequestDTO] = Field(
+        ...,
+        min_length=1,
+        description="Lista de itens de amostra coletados a serem persistidos",
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+
+class AmostraItemResponseDTO(BaseModel):
+    """Dados de uma amostra registrada retornados na resposta."""
+
+    id: int = Field(..., description="ID primário da amostra")
+    operacao_id: int = Field(..., description="ID da operação do veículo")
+    compartimento_id: int = Field(..., description="ID do compartimento físico vinculado")
+    identificador_compartimento: Optional[str] = Field(
+        None, description="Identificador textual do compartimento (ex: C1, C2)"
+    )
+    produto_id: int = Field(..., description="ID do produto")
+    produto_nome: Optional[str] = Field(None, description="Nome do produto combustível")
+    codigo_amostra: str = Field(..., description="Código identificador único gerado para a amostra")
+    temperatura_coleta_celsius: Decimal = Field(..., description="Temperatura apurada na coleta em °C")
+    tipo_coleta: TipoColeta = Field(..., description="Técnica de coleta da amostra")
+    status_amostra: StatusAmostra = Field(..., description="Status atual da amostra na esteira analítica")
+    is_recoleta: bool = Field(..., description="Indica se é uma recoleta")
+    data_hora_coleta: datetime = Field(..., description="Data e hora do registro da coleta")
+    operador_id: int = Field(..., description="ID do usuário que registrou a coleta")
+    operador_nome: Optional[str] = Field(None, description="Nome do operador responsável")
+    origem_mp: Optional[OrigemMP] = Field(None, description="Origem da matéria-prima")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+
+class RegistrarAmostrasResponseDTO(BaseModel):
+    """Payload de resposta retornado após o registro de amostras."""
+
+    sucesso: bool = Field(True, description="Indicador de sucesso da operação")
+    mensagem: str = Field("Amostras registradas com sucesso.", description="Mensagem de feedback")
+    operacao_id: int = Field(..., description="ID da operação do veículo")
+    status_operacao: Optional[StatusOperacao] = Field(
+        None, description="Novo status operacional do veículo (ex: EM_AMOSTRAGEM ou EM_ANALISE_LAB)"
+    )
+    total_amostras_registradas: int = Field(..., description="Quantidade total de amostras criadas")
+    amostras: List[AmostraItemResponseDTO] = Field(
+        default_factory=list, description="Lista detalhada das amostras recém-criadas"
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
+
+
+AmostraItemRequestDTO.model_rebuild()
+RegistrarAmostrasRequestDTO.model_rebuild()
+AmostraItemResponseDTO.model_rebuild()
+RegistrarAmostrasResponseDTO.model_rebuild()
 
