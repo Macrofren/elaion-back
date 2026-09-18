@@ -74,6 +74,13 @@ else
     echo ">> [3/4] Execução de seeds desabilitada (RUN_SEEDS=$RUN_SEEDS)."
 fi
 
+# 3.1 Seed opcional de códigos de ativação de teste (idempotente, gated por env)
+if [ -n "$SEED_CONVITES" ]; then
+    echo ">> [3.1] Inserindo códigos de ativação de teste (SEED_CONVITES)..."
+    python scripts/seed_convites_teste.py
+    echo "   ✓ Seed de convites de teste concluído."
+fi
+
 # 4. Handover para o comando final (Uvicorn)
 echo ">> [4/4] Subindo servidor Uvicorn..."
 echo "---------------------------------------------------------------"
